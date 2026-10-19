@@ -6,6 +6,13 @@
 .app .nav a:hover{background:var(--btn-hov)}
 .app .nav a.on{background:var(--muted-bg);font-weight:600}
 .app .nav a.on::before{content:"";position:absolute;left:-8px;top:6px;bottom:6px;width:4px;border-radius:4px;background:var(--acc)}
+.md pre{margin:0 0 16px;padding:12px 16px;background:var(--code);border:1px solid var(--bd);border-radius:6px;overflow-x:auto;font-size:12px;line-height:1.6}
+.md pre code{padding:0;background:none;font-size:inherit;border-radius:0}
+pre.sample{margin:0;padding:12px 16px;background:var(--code);overflow:auto;max-height:640px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.dl-bar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.md .box{border:1px solid var(--bd);border-radius:6px;background:var(--bg);overflow:hidden}
+.md .bh{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--subtle);border-bottom:1px solid var(--bd)}
+.md .box pre.sample{border:0;border-radius:0}
 {% endblock %}
 {% block main %}
 <main style="max-width:1280px;margin:0 auto;padding:32px 24px;box-sizing:border-box;display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start">
@@ -16,12 +23,29 @@
 <nav class="nav">
 {% for t, c in types.items() %}<a class="{{ 'on' if current == t }}" href="{{ base }}/guides/{{ t }}">{{ c.label }}</a>{% endfor %}
 </nav>
+<strong class="mut" style="font-size:12px;padding:8px 8px 0">Developers</strong>
+<nav class="nav">
+<a class="{{ 'on' if current == 'api' }}" href="{{ base }}/guides/api">Python package &amp; API</a>
+<a class="{{ 'on' if current == 'api-confluence' }}" href="{{ base }}/guides/api-confluence">Sample: Confluence (wiki)</a>
+<a class="{{ 'on' if current == 'api-jira' }}" href="{{ base }}/guides/api-jira">Sample: Jira</a>
+</nav>
 <strong class="mut" style="font-size:12px;padding:8px 8px 0">Extending</strong>
 <nav class="nav"><a class="{{ 'on' if current == 'connectors' }}" href="{{ base }}/guides/connectors">Writing a connector</a></nav>
 </aside>
 
 <article class="md" style="flex:999 1 560px;min-width:0;max-width:820px">
+{% if downloads %}
+<div class="dl-bar">{% for label, href in downloads %}<a class="btn{{ ' pri' if loop.first }}" href="{{ href }}" download style="text-decoration:none{{ ';color:#fff' if loop.first }}">{{ icon('upload', '', 'transform:rotate(180deg)' ~ (';color:#fff' if loop.first else '')) }}{{ label }}</a>{% endfor %}</div>
+{% endif %}
 {{ guide_html|safe }}
+{% if sample %}
+<div class="box" style="margin:0 0 16px">
+<div class="bh"><span class="mono" style="flex:1;font-weight:600">{{ sample_name }}</span>
+<button class="btn sm" aria-label="Copy script" data-copy-from="#sample-code">{{ icon('copy') }}Copy</button>
+<a class="btn sm" href="{{ base }}/downloads/samples/{{ sample_name }}" download style="text-decoration:none">Download</a></div>
+<pre class="sample" id="sample-code">{{ sample }}</pre>
+</div>
+{% endif %}
 {% if current in types %}
 <p><a class="btn pri" href="{{ base }}/sources/new?type={{ current }}" style="color:#fff;text-decoration:none">Add a {{ types[current].label.split(' (')[0] }} source</a></p>
 {% endif %}

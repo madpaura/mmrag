@@ -309,3 +309,52 @@ def test_same_item_from_two_sources_is_owned_by_the_first(stack):
     assert [x["source_id"] for x in rows] == [jid]
     log = " ".join(x["msg"] for x in stack.app.state.db.all("select msg from run_log where run_id=?", r["id"]))
     assert "already ingested by source 'issues'" in log
+
+
+def test_developer_guides_and_downloads(stack, tmp_path):
+    for p in ("/guides/api", "/guides/api-confluence", "/guides/api-jira"):
+        r = stack.get(B + p)
+        assert r.status_code == 200 and "Developers" in r.text, p
+    page = stack.get(B + "/guides/api-confluence").text
+    assert "confluence_ingest.py" in page and 'id="sample-code"' in page and "{{" not in page
+    assert stack.get(B + "/guides/api-nope").status_code == 404
+    assert f'href="{B}/guides/api"' in stack.get(B + "/documents").text
+    # samples come with this project's LightRAG URL and package URL filled in
+    for name in ("confluence_ingest.py", "jira_ingest.py"):
+        r = stack.get(f"{B}/downloads/samples/{name}")
+        assert r.status_code == 200 and "{{" not in r.text
+        assert 'LIGHTRAG_URL = "' + stack.app.state.settings.lightrag_url in r.text
+        compile(r.text, name, "exec")
+    assert stack.get(f"{B}/downloads/samples/../main.py").status_code == 404
+    # the package zip is a pip-installable source tree
+    import io, zipfile
+    z = zipfile.ZipFile(io.BytesIO(stack.get(f"{B}/downloads/mmrag_connectors.zip").content))
+    names = z.namelist()
+    assert "mmrag_connectors/pyproject.toml" in names
+    assert "mmrag_connectors/src/mmrag_connectors/samples/jira_ingest.py" in names
+    assert not any("__pycache__" in n or ".egg-info" in n for n in names)
+
+
+def test_samples_run_end_to_end(stack, tmp_path):
+    """Run both downloaded samples as real scripts against the simulators: ingest, re-run (skip), change (replace)."""
+    import subprocess, sys as _sys, httpx
+    lr = stack.app.state.settings.lightrag_url
+    env = {"PATH": "/usr/bin:/bin", "CONFLUENCE_TOKEN": "sim-token", "JIRA_TOKEN": "sim-token"}
+    for name, args in (("confluence_ingest.py", ["--base-url", stack.atlassian + "/confluence", "--root", "1000", "--depth", "2"]),
+                       ("jira_ingest.py", ["--base-url", stack.atlassian + "/jira", "--keys", "SIM-4,SIM-5"])):
+        f = tmp_path / name
+        f.write_text(stack.get(f"{B}/downloads/samples/{name}").text)
+        cmd = [_sys.executable, str(f), *args, "--lightrag-url", lr, "--state", str(tmp_path / (name + ".state"))]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env, cwd=tmp_path)
+        assert out.returncode == 0, out.stdout + out.stderr
+        assert "done" in out.stdout and "queued" in out.stdout, out.stdout
+        again = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env, cwd=tmp_path)
+        assert "0 queued" in again.stdout and "unchanged" in again.stdout, again.stdout
+    httpx.post(stack.atlassian + "/sim/touch/issue/SIM-4").raise_for_status()
+    f = tmp_path / "jira_ingest.py"
+    cmd = [_sys.executable, str(f), "--base-url", stack.atlassian + "/jira", "--keys", "SIM-4,SIM-5",
+           "--lightrag-url", lr, "--state", str(tmp_path / "jira_ingest.py.state")]
+    out = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env, cwd=tmp_path)
+    assert out.returncode == 0 and "1 queued, 1 unchanged" in out.stdout, out.stdout + out.stderr
+    srcs = [d["src"] for d in stack.lightrag.DOCS.values()]
+    assert len(srcs) == len(set(srcs)) == 7  # 5 pages + 2 issues, the changed issue replaced, not duplicated

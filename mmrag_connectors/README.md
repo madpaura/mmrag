@@ -7,9 +7,18 @@ Reusable Python package used by the management portal, which can also be used on
 * **`LightRAGClient`**: a thin client for the LightRAG server API (insert, upload, track, delete, clear, query).
 
 ```bash
-pip install ./mmrag_connectors          # from this repo
-python examples/sample_ingest.py confluence
+pip install ./mmrag_connectors                                        # from this repo
+pip install "http://mydomain.com/mmrag/<proj>/mgmt/downloads/mmrag_connectors.zip"   # or from any project portal
 ```
+
+Ready-to-run samples (also downloadable from the portal's **Guides → Developers**, pre-filled with the project URL):
+
+| Sample | Run |
+| --- | --- |
+| `src/mmrag_connectors/samples/confluence_ingest.py` | `CONFLUENCE_TOKEN=… python confluence_ingest.py --base-url https://confluence.example.com --root 123456 --depth 3` |
+| `src/mmrag_connectors/samples/jira_ingest.py` | `JIRA_TOKEN=… python jira_ingest.py --base-url https://jira.example.com --project ABC` |
+
+Both skip unchanged content on re-runs (`--state` file) and replace changed content.
 
 ## Use it in code
 
@@ -19,7 +28,7 @@ from mmrag_connectors import get, LightRAGClient
 conf = get("confluence")({"base_url": "https://confluence.example.com", "token": "…",
                           "roots": "https://confluence.example.com/pages/viewpage.action?pageId=123", "depth": 3})
 lr = LightRAGClient("http://mydomain.com/mmrag/p1/api")
-tracks = [lr.insert_text(d.content, d.file_source) for d in conf.fetch()]
+tracks = [lr.upsert_text(d.content, d.file_source) for d in conf.fetch()]   # insert or replace
 lr.wait(tracks)           # polls /documents/track_status until PROCESSED / FAILED
 ```
 

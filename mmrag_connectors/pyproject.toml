@@ -21,4 +21,4 @@ jira = "mmrag_connectors.jira:JiraConnector"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mmrag_connectors = ["guides/*.md"]
+mmrag_connectors = ["guides/*.md", "samples/*.py"]

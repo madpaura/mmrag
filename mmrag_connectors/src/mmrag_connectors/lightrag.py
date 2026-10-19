@@ -56,6 +56,35 @@ class LightRAGClient:
         holds with LightRAGError(status=409) — make basenames unique per document."""
         return self._req("POST", "/documents/text", json={"text": text, "file_source": file_source})["track_id"]
 
+    def upsert_text(self, text: str, file_source: str, timeout: float = 900, interval: float = 3) -> str:
+        """Insert, or replace the document LightRAG already holds under this name. Returns track_id.
+
+        Handles LightRAG's rules for you: a duplicate name is rejected (409), deletes are refused while the
+        pipeline is busy, and deletion finishes in the background — so it waits for each step (up to `timeout`)."""
+        deadline = time.time() + timeout
+        try:
+            return self.insert_text(text, file_source)
+        except LightRAGError as e:
+            if e.status != 409:
+                raise
+        old = self.find_by_file_path(file_source)
+        if old:
+            while True:
+                try:
+                    self.delete_documents([old["id"]])
+                    break
+                except LightRAGBusy:
+                    if time.time() > deadline:
+                        raise
+                    time.sleep(interval)
+        while True:  # the old version disappears asynchronously
+            try:
+                return self.insert_text(text, file_source)
+            except LightRAGError as e:
+                if e.status != 409 or time.time() > deadline:
+                    raise
+                time.sleep(interval)
+
     def upload_file(self, path: str | Path, name: str | None = None) -> str:
         p = Path(path)
         with p.open("rb") as fh:

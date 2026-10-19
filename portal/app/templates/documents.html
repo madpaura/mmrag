@@ -10,6 +10,7 @@
 <input type="hidden" name="status" value="{{ status if status != 'all' else '' }}">
 <label style="flex:1 1 300px;display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);box-sizing:border-box">{{ icon('search', 'mut') }}<input name="q" value="{{ q }}" aria-label="Search documents" placeholder="Search by title or file name" style="border:0;outline:0;background:transparent;color:var(--fg);flex:1;font:inherit;min-width:0"></label>
 <label class="mut" style="display:flex;align-items:center;gap:6px;font-size:12px">Source<select class="inp" name="source" style="padding:0 8px" onchange="this.form.submit()"><option value="">All sources</option>{% for s in sources %}<option value="{{ s.id }}"{% if source == s.id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+<a class="btn" href="{{ base }}/guides/api">{{ icon('code') }}Ingest via API</a>
 <a class="btn" href="{{ base }}/files">{{ icon('upload') }}Upload documents</a>
 </form>
 
@@ -62,6 +63,7 @@
 </table>
 </div>
 </form>
-<span class="mut" style="font-size:12px">Deleting removes the document and its chunks, entities and relations from LightRAG. The source can ingest it again on its next run.</span>
+<span class="mut" style="font-size:12px">Deleting removes the document and its chunks, entities and relations from LightRAG. The source can ingest it again on its next run.
+Ingesting from your own scripts? Use the <a href="{{ base }}/guides/api">Python package</a> or the <a href="{{ base }}/guides/api-confluence">Confluence</a> / <a href="{{ base }}/guides/api-jira">Jira</a> samples.</span>
 </main>
 {% endblock %}

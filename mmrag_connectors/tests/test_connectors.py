@@ -79,3 +79,12 @@ def test_confluence_bad_token_fails_instead_of_skipping(atlassian):
 def test_confluence_missing_page_is_skipped(atlassian):
     c = get("confluence")({"base_url": atlassian + "/confluence", "token": "sim-token", "roots": "1000\n424242", "depth": 1})
     assert [d.external_id for d in c.fetch()] == ["confluence:1000"]
+
+
+def test_upsert_replaces_existing_even_while_busy(lightrag_url):
+    import mock_lightrag
+    c = LightRAGClient(lightrag_url)
+    c.insert_text("v1", "doc.md")                        # pipeline busy for a moment
+    t = c.upsert_text("v2", "doc.md", interval=0.1, timeout=20)
+    c.wait([t], interval=0.1, timeout=10)
+    assert [d["text"] for d in mock_lightrag.DOCS.values()] == ["v2"]

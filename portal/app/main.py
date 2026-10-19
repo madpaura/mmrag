@@ -573,6 +573,75 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return _md((HERE / "guides" / GUIDE_FILES[name]).read_text().replace("{{base}}", s.base_path))
         return _md(get(name).guide_text() or "_No guide provided._")
 
+    # ---- developers: package + samples for direct API integration ---------
+    SAMPLES = {"confluence": ("confluence_ingest.py", "Confluence (wiki)"), "jira": ("jira_ingest.py", "Jira")}
+
+    def portal_url(request: Request) -> str:
+        if s.public_api_url.rstrip("/").endswith("/api"):
+            return s.public_api_url.rstrip("/")[:-4] + "/mgmt"
+        return str(request.base_url).rstrip("/") + s.base_path
+
+    def sample_text(request: Request, name: str) -> str:
+        from importlib import resources
+        txt = resources.files("mmrag_connectors").joinpath(f"samples/{name}").read_text("utf-8")
+        return (txt.replace("{{LIGHTRAG_URL}}", api_url)
+                .replace("{{PACKAGE_URL}}", portal_url(request) + "/downloads/mmrag_connectors.zip"))
+
+    def package_dir() -> Path | None:
+        import mmrag_connectors
+        cands = [os.environ.get("PORTAL_PKG_SRC"), str(Path(mmrag_connectors.__file__).parents[2]), "/src/mmrag_connectors"]
+        for c in filter(None, cands):
+            if (Path(c) / "pyproject.toml").is_file():
+                return Path(c)
+        return None
+
+    @r.get("/downloads/mmrag_connectors.zip")
+    def download_package():
+        import io
+        import zipfile
+        from fastapi.responses import Response
+        root = package_dir() or _404()
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in sorted(root.rglob("*")):
+                rel = f.relative_to(root)
+                if f.is_file() and not any(part in ("__pycache__", ".pytest_cache") or part.endswith(".egg-info")
+                                           for part in rel.parts):
+                    z.write(f, Path("mmrag_connectors") / rel)
+        return Response(buf.getvalue(), media_type="application/zip",
+                        headers={"Content-Disposition": 'attachment; filename="mmrag_connectors.zip"'})
+
+    @r.get("/downloads/samples/{name}")
+    def download_sample(request: Request, name: str):
+        from fastapi.responses import Response
+        if name not in {f for f, _ in SAMPLES.values()}:
+            raise HTTPException(404)
+        return Response(sample_text(request, name), media_type="text/x-python; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @r.get("/guides/api", response_class=HTMLResponse)
+    def guide_api(request: Request):
+        md = (HERE / "guides" / "api.md").read_text()
+        for k, val in {"{{base}}": s.base_path, "{{API}}": api_url, "{{PKG}}": portal_url(request) + "/downloads/mmrag_connectors.zip",
+                       "{{PORTAL}}": portal_url(request)}.items():
+            md = md.replace(k, val)
+        return page(request, "guides.html", tab="guides", types=connectors(), current="api", guide_html=_md(md),
+                    downloads=[("Python package (.zip)", f"{s.base_path}/downloads/mmrag_connectors.zip")])
+
+    @r.get("/guides/api-{kind}", response_class=HTMLResponse)
+    def guide_api_sample(request: Request, kind: str):
+        if kind not in SAMPLES:
+            raise HTTPException(404)
+        fname, label = SAMPLES[kind]
+        md = (HERE / "guides" / f"api-{kind}.md").read_text()
+        for k, val in {"{{base}}": s.base_path, "{{API}}": api_url, "{{PKG}}": portal_url(request) + "/downloads/mmrag_connectors.zip",
+                       "{{SAMPLE_URL}}": portal_url(request) + f"/downloads/samples/{fname}"}.items():
+            md = md.replace(k, val)
+        return page(request, "guides.html", tab="guides", types=connectors(), current=f"api-{kind}", guide_html=_md(md),
+                    sample=sample_text(request, fname), sample_name=fname,
+                    downloads=[(fname, f"{s.base_path}/downloads/samples/{fname}"),
+                               ("Python package (.zip)", f"{s.base_path}/downloads/mmrag_connectors.zip")])
+
     @r.get("/guides", response_class=HTMLResponse)
     def guides(request: Request):
         return page(request, "guides.html", tab="guides", types=connectors(), current="overview",
