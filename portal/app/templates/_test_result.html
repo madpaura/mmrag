@@ -1,0 +1,6 @@
+{%- from "_icons.html" import icon -%}
+{%- if ok -%}
+<span class="ok" style="display:flex;gap:6px;align-items:center;font-size:12px">{{ icon('ok') }}Connected. {{ msg|capitalize if msg != 'ok' else 'Token is valid.' }}</span>
+{%- else -%}
+<span class="bad" style="display:flex;gap:6px;align-items:center;font-size:12px">{{ icon('bad') }}{{ msg }}</span>
+{%- endif -%}

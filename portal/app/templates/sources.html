@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, kind_icon, type_icon, hist_squares %}
+{% block title %}Sources{% endblock %}
+{% block css %}{% include "css/sources.css" %}{% endblock %}
+{% block main %}
+<main class="wrap" style="display:flex;flex-direction:column;gap:24px">
+{% include "_flash.html" %}
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+<label style="flex:1 1 280px;display:flex"><span class="visually-hidden">Find a source</span><input class="inp" placeholder="Find a source…" style="width:100%" data-filter="#srclist"></label>
+<label class="mut" style="display:flex;align-items:center;gap:6px;font-size:12px">Type<select class="inp" style="padding:0 8px" data-filter="#srclist" data-key="type"><option value="all">All</option>{% for t, c in types.items() %}<option value="{{ t }}">{{ v.TYPE_LABEL.get(t, c.label) }}</option>{% endfor %}<option value="files">Files</option></select></label>
+<label class="mut" style="display:flex;align-items:center;gap:6px;font-size:12px">Last run<select class="inp" style="padding:0 8px" data-filter="#srclist" data-key="kind"><option value="all">Any status</option><option value="ok">Completed</option><option value="warn">With errors</option><option value="bad">Failed</option><option value="stop">Cancelled</option><option value="none">Never run</option></select></label>
+<a class="btn pri" href="{{ base }}/sources/new">{{ icon('plus') }}New source</a>
+</div>
+
+<section class="box" aria-label="Sources" id="srclist">
+<div class="bh"><strong style="flex:1" data-count-for="#srclist" data-noun="source">{{ sources|length }} source{{ '' if sources|length == 1 else 's' }}</strong><span class="mut" style="font-size:12px">Sort: Last run</span></div>
+{% for s in sources %}
+<div class="br" style="padding:20px 16px;align-items:flex-start" data-f="{{ s.name }} {{ s.desc }} {{ s.type_label }}" data-type="{{ s.type }}" data-kind="{{ s.last.kind if s.last else 'none' }}">
+<div style="flex:1 1 360px;min-width:0;display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><a href="{{ base }}{{ s.href }}" style="font-size:20px;font-weight:600">{{ s.name }}</a><span class="lbl">{{ s.type_label }}</span>{% if not s.enabled %}<span class="lbl warn">Paused</span>{% endif %}</div>
+<span class="mut">{{ s.desc }}</span>
+<div class="mut" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;align-items:center">
+<span style="display:flex;gap:4px;align-items:center">{% if s.last %}{{ kind_icon(s.last.kind) }}{{ s.last.text }} · run #{{ s.last.id }}{% else %}{{ icon('clock') }}Never run{% endif %}</span>
+<span style="display:flex;gap:4px;align-items:center">{{ icon('file') }}{{ s.docs }} document{{ '' if s.docs == 1 else 's' }}</span>
+<span style="display:flex;gap:4px;align-items:center">{{ icon('clock') }}{{ s.schedule|title }}{% if s.next_run_at %} · next {{ s.next_run_at|fmt_short }}{% endif %}</span>
+<span>Last run {{ s.last_run_at|fmt_short }}{% if s.last_run_at %} UTC{% endif %}</span>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+<div style="display:flex;gap:8px">
+{% if s.is_files %}
+<a class="btn sm" href="{{ base }}/files">{{ icon('upload') }}Upload</a>
+{% else %}
+<form class="inline" method="post" action="{{ base }}/sources/{{ s.id }}/run"><button class="btn sm"{% if s.last and s.last.active %} disabled title="A run is in progress"{% endif %}>{{ icon('play') }}Run now</button></form>
+{% endif %}
+<details class="menu"><summary class="btn sm" aria-label="More actions for {{ s.name }}">{{ icon('dots') }}</summary>
+<div class="menu-pop right">
+<a href="{{ base }}{{ s.href }}">Open</a>
+{% if not s.is_files %}<a href="{{ base }}/sources/{{ s.id }}/edit">Edit settings</a>{% endif %}
+<a href="{{ base }}/runs?source={{ s.id }}">View runs</a>
+<a href="{{ base }}/documents?source={{ s.id }}">View documents</a>
+<hr>
+<form method="post" action="{{ base }}/sources/{{ s.id }}/purge" data-confirm="Delete all {{ s.docs }} document(s) of {{ s.name }} from LightRAG?"><input type="hidden" name="back" value="/sources"><button class="dng-item">Delete ingested data</button></form>
+{% if not s.is_files %}<form method="post" action="{{ base }}/sources/{{ s.id }}/delete" data-confirm="Remove {{ s.name }}? Its ingested data stays in LightRAG."><button class="dng-item">Remove source</button></form>{% endif %}
+</div></details>
+</div>
+<div style="display:flex;gap:3px" role="img" aria-label="{{ s.hist_label }}">{{ hist_squares(s.hist) }}</div>
+</div>
+</div>
+{% endfor %}
+<div class="br empty" data-empty hidden style="justify-content:center">No sources match the filters.</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px" aria-labelledby="conn-h">
+<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h2 id="conn-h" style="margin:0;font-size:16px;font-weight:600">Add a connector</h2><span class="mut" style="font-size:12px">Each source fetches content, skips anything unchanged since the last run and sends the rest to LightRAG.</span></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:16px">
+{% set blurbs = {'confluence': 'Root pages and their children, or a whole space. Optionally follows linked Jira tickets.',
+                 'jira': 'By project, JQL or explicit issue keys, with comments and linked-issue depth.'} %}
+{% for t, c in types.items() %}
+<div class="card">
+<div style="display:flex;gap:8px;align-items:center">{{ type_icon(t, 'mut') }}<strong>{{ c.label }}</strong></div>
+<span class="mut" style="font-size:12px">{{ blurbs.get(t, 'Connector plugin: ' ~ c.label ~ '.') }}</span>
+<div style="display:flex;gap:8px;margin-top:auto"><a class="btn sm" href="{{ base }}/sources/new?type={{ t }}">Configure</a><a class="btn sm" href="{{ base }}/guides/{{ t }}" style="background:transparent;border-color:transparent;color:var(--acc)">Guide</a></div>
+</div>
+{% endfor %}
+<div class="card">
+<div style="display:flex;gap:8px;align-items:center">{{ icon('folder', 'mut') }}<strong>Files</strong><span class="lbl">built in</span></div>
+<span class="mut" style="font-size:12px">PDF, DOCX, PPTX, MD, TXT. Re-uploading a file with the same name replaces it.</span>
+<div style="display:flex;gap:8px;margin-top:auto"><a class="btn sm" href="{{ base }}/files">Upload</a></div>
+</div>
+<div class="card" style="border-style:dashed;background:var(--subtle)">
+<div style="display:flex;gap:8px;align-items:center">{{ icon('plug', 'mut') }}<strong>Build a connector</strong></div>
+<span class="mut" style="font-size:12px">Connectors are plugins. See the <span class="mono">mmrag_connectors</span> README.</span>
+<div style="display:flex;gap:8px;margin-top:auto"><a class="btn sm" href="{{ base }}/guides/connectors">Read the docs</a></div>
+</div>
+</div>
+</section>
+</main>
+{% endblock %}

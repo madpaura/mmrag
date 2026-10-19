@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, kind_icon %}
+{% block title %}Runs{% endblock %}
+{% block css %}{% include "css/runs.css" %}{% endblock %}
+{% block main %}
+<main class="wrap" style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start"{% if runs|selectattr('active')|list %} hx-get="{{ base }}/runs?{{ request.query_params }}" hx-trigger="every 3s" hx-select="#runbox" hx-target="#runbox" hx-swap="outerHTML"{% endif %}>
+<aside style="flex:1 1 220px;max-width:280px;min-width:0;padding-left:8px;display:flex;flex-direction:column;gap:16px" aria-label="Filter by source">
+<div class="nav">
+{% for n in nav_src %}
+<button class="{{ 'on' if (n.id == source) or (n.id is none and not source) }}" onclick="location.href='{{ base }}/runs{{ ('?source=' ~ n.id) if n.id else '' }}{{ ('&' if n.id else '?') ~ 'status=' ~ status if status else '' }}'">{{ icon('play', 'mut') }}<span style="flex:1">{{ n.label }}</span><span class="cnt">{{ n.count }}</span></button>
+{% endfor %}
+</div>
+<div style="border-top:1px solid var(--bd);padding-top:16px;display:flex;flex-direction:column;gap:6px;font-size:12px">
+<strong>How a run works</strong>
+<span class="mut">found at source → unchanged skipped → sent to LightRAG → processed or failed</span>
+<a href="{{ base }}/guides">Read the guide</a>
+</div>
+</aside>
+
+<div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">
+{% include "_flash.html" %}
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+<h1 style="margin:0;font-size:20px;font-weight:600;flex:1">{{ heading }}</h1>
+<form method="get" action="{{ base }}/runs" class="inline">
+{% if source %}<input type="hidden" name="source" value="{{ source }}">{% endif %}
+<label class="mut" style="display:flex;align-items:center;gap:6px;font-size:12px">Status<select class="inp" name="status" style="padding:0 8px" onchange="this.form.submit()">
+{% for val, lab in [('', 'All'), ('completed', 'Completed'), ('errors', 'With errors'), ('failed', 'Failed'), ('cancelled', 'Cancelled'), ('running', 'In progress')] %}<option value="{{ val }}"{% if status == val %} selected{% endif %}>{{ lab }}</option>{% endfor %}
+</select></label>
+</form>
+<details class="menu"><summary class="btn pri">{{ icon('play') }}Run a source{{ icon('caret') }}</summary>
+<div class="menu-pop right">
+{% for s in runnable %}<form method="post" action="{{ base }}/sources/{{ s.id }}/run"><button{% if s.last and s.last.active %} disabled{% endif %}>{{ s.name }} <span class="mut">· {{ s.type_label }}</span></button></form>{% else %}<a href="{{ base }}/sources/new">Add a source first</a>{% endfor %}
+<hr><a href="{{ base }}/files">Upload files…</a>
+</div></details>
+</div>
+<div class="box" id="runbox">
+<div class="bh">
+<strong style="flex:1">{{ runs|length }} run{{ '' if runs|length == 1 else 's' }}</strong>
+<span class="mut" style="font-size:12px;display:flex;gap:12px;align-items:center"><span style="display:flex;gap:4px;align-items:center"><span class="sq" style="background:var(--ok)"></span>processed</span><span style="display:flex;gap:4px;align-items:center"><span class="sq" style="background:var(--neu)"></span>unchanged</span><span style="display:flex;gap:4px;align-items:center"><span class="sq" style="background:var(--bad)"></span>failed</span></span>
+</div>
+{% for r in runs %}
+<div class="br" style="padding:14px 16px">
+{{ kind_icon(r.kind) }}
+<div style="flex:1 1 240px;min-width:0;display:flex;flex-direction:column">
+<a href="{{ base }}/runs/{{ r.id }}" style="font-weight:600;color:var(--fg)">{{ r.sname }} · {{ r.text }}</a>
+<span class="mut" style="font-size:12px">Run #{{ r.id }} · {{ r.trigger or 'manual' }} · <span class="mono">{{ r.started_at|fmt_full }} UTC</span></span>
+</div>
+<div class="stat mut"><span title="Found"><strong style="color:var(--fg)">{{ r.discovered }}</strong> found</span><span title="New or changed"><strong style="color:var(--fg)">{{ r.submitted }}</strong> new</span><span title="Failed" style="color:{{ 'var(--bad)' if r.failed else 'var(--mut)' }}"><strong>{{ r.failed }}</strong> failed</span></div>
+<div class="bar" role="img" aria-label="{{ r.summary }}"><span style="width:{{ r.pPr }}%;background:var(--ok)"></span><span style="width:{{ r.pUn }}%;background:var(--neu)"></span><span style="width:{{ r.pFl }}%;background:var(--bad)"></span></div>
+{% if r.stype == 'files' or r.active %}
+<button class="btn sm" disabled aria-label="Re-run #{{ r.id }}" title="{{ 'Running' if r.active else 'Upload the files again to re-run' }}">{{ icon('retry') }}</button>
+{% else %}
+<form class="inline" method="post" action="{{ base }}/runs/{{ r.id }}/rerun"><button class="btn sm" aria-label="Re-run #{{ r.id }}" title="Run {{ r.sname }} again">{{ icon('retry') }}</button></form>
+{% endif %}
+</div>
+{% else %}
+<div class="br empty" style="justify-content:center">No runs{{ ' match this filter' if status or source else ' yet' }}.</div>
+{% endfor %}
+</div>
+</div>
+</main>
+{% endblock %}

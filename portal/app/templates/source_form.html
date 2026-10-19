@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ 'Edit ' ~ source.name if source else 'New source' }}{% endblock %}
+{% block css %}{% include "css/new_source.css" %}{% endblock %}
+{%- macro field(f, extra_style='') -%}
+{%- set val = cfg.get(f.name) -%}
+{%- if f.type == 'bool' -%}
+<label class="chk"><input type="checkbox" name="{{ f.name }}" value="on"{% if val in (True, 'on', 'true', 'True', 1) %} checked{% endif %}><span><strong>{{ f.label }}</strong>{% if f.help %}<br><span class="hint">{{ f.help }}</span>{% endif %}</span></label>
+{%- else -%}
+<div class="fld"{% if extra_style %} style="{{ extra_style }}"{% endif %}><label for="f_{{ f.name }}">{{ f.label }}{% if f.required %} <span class="req">*</span>{% endif %}</label>
+{%- if f.type == 'textarea' -%}
+<textarea id="f_{{ f.name }}" name="{{ f.name }}" class="inp" rows="{{ 2 if f.name in ('jql', 'jira_instances') else 3 }}" placeholder="{{ f.help if f.name == 'jira_instances' else ('One page URL or id per line' if f.name == 'roots' else '') }}">{{ val or '' }}</textarea>
+{%- elif f.type == 'select' -%}
+<select id="f_{{ f.name }}" name="{{ f.name }}" class="inp" style="max-width:240px">{% for o in f.options %}<option{% if val == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+{%- elif f.type == 'password' -%}
+<input id="f_{{ f.name }}" name="{{ f.name }}" class="inp mono" type="password" autocomplete="new-password" placeholder="{{ 'Stored · leave blank to keep' if source and val else 'Paste token' }}"{% if f.required and not source %} required{% endif %}>
+{%- elif f.type == 'number' -%}
+<input id="f_{{ f.name }}" name="{{ f.name }}" class="inp" type="number" min="0" value="{{ val if val is not none else '' }}" style="max-width:120px">
+{%- else -%}
+<input id="f_{{ f.name }}" name="{{ f.name }}" class="inp{{ ' mono' if f.name in ('base_url', 'space', 'project', 'keys') }}" value="{{ val or '' }}"{% if f.required %} required{% endif %} placeholder="{{ {'base_url': 'https://' ~ cls.type ~ '.example.com', 'space': 'e.g. SIM', 'project': 'e.g. FW', 'keys': 'FW-101, FW-102'}.get(f.name, '') }}">
+{%- endif -%}
+{%- if f.type == 'password' -%}<span class="hint">Stored server-side and never shown again. <a href="{{ base }}/guides/{{ cls.type }}">How to create one</a></span>
+{%- elif f.help and f.name != 'jira_instances' -%}<span class="hint">{{ f.help }}</span>{%- endif -%}
+</div>
+{%- endif -%}
+{%- endmacro -%}
+{% block main %}
+<main style="max-width:1120px;margin:0 auto;padding:32px 24px;box-sizing:border-box;display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start">
+<form id="srcform" method="post" action="{{ base }}/{{ 'sources/%d/edit' % source.id if source else 'sources' }}" style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+<input type="hidden" name="type" value="{{ cls.type }}">
+{% if source %}<input type="hidden" name="source_id" value="{{ source.id }}">{% endif %}
+<div style="display:flex;flex-direction:column;gap:4px;padding-bottom:16px">
+{% if source %}<nav class="mut" style="font-size:12px;display:flex;gap:6px" aria-label="Breadcrumb"><a href="{{ base }}/sources">Sources</a><span>/</span><a href="{{ base }}/sources/{{ source.id }}">{{ source.name }}</a><span>/</span><span>Edit</span></nav>{% endif %}
+<h1 style="margin:0;font-size:24px;font-weight:600">{{ 'Edit source' if source else 'Connect a new source' }}</h1>
+<span class="mut">A source pulls content into this project's LightRAG. Fields marked <span class="req">*</span> are required.</span>
+</div>
+{% if error %}
+<div style="display:flex;gap:8px;align-items:center;padding:12px 16px;border:1px solid var(--bad-bd);background:var(--bad-bg);border-radius:6px;margin-bottom:8px" role="alert"><span class="bad" style="display:flex">{{ icon('bad') }}</span><strong>{{ error }}</strong></div>
+{% endif %}
+
+<section class="step">
+<h2><span class="num">1</span>Connector</h2>
+<div style="display:flex;gap:12px;flex-wrap:wrap" role="radiogroup" aria-label="Connector">
+{% set hints = {'confluence': 'Pages, children and spaces', 'jira': 'Projects, JQL or issue keys'} %}
+{% for t, c in types.items() %}
+{% if source and t != cls.type %}{% continue %}{% endif %}
+<a role="radio" aria-checked="{{ 'true' if t == cls.type else 'false' }}" class="pick{{ ' on' if t == cls.type }}" href="{{ base }}/sources/new?type={{ t }}" style="text-decoration:none;color:var(--fg)"{% if source %} aria-disabled="true" onclick="return false"{% endif %}><span class="radio"></span><span style="display:flex;flex-direction:column;gap:2px"><strong>{{ c.label }}</strong><span class="hint">{{ hints.get(t, 'Connector plugin') }}{% if source %} · can't be changed{% endif %}</span></span></a>
+{% endfor %}
+</div>
+</section>
+
+<section class="step">
+<h2><span class="num">2</span>Connection</h2>
+<div class="fld"><label for="nm">Name <span class="req">*</span></label><input id="nm" name="name" class="inp" required value="{{ name }}" placeholder="{{ 'e.g. firmware-wiki' if cls.type == 'confluence' else 'e.g. fw-issues' }}" style="max-width:360px"><span class="hint">Shown in runs and document lists.</span></div>
+{% for f in conn_fields %}{{ field(f) }}{% endfor %}
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--bd);border-radius:6px;background:var(--subtle)">
+<button type="button" class="btn sm" hx-post="{{ base }}/sources/test" hx-include="#srcform" hx-target="#testres" hx-swap="innerHTML">{{ icon('link') }}Test connection</button>
+<span id="testres"><span class="hint">Check the URL and token before saving.</span></span>
+</div>
+</section>
+
+<section class="step">
+<h2><span class="num">3</span>What to ingest</h2>
+<div style="display:flex;flex-direction:column;gap:16px">
+{% for row in ingest_rows %}
+{% if row.kind == 'g2' %}
+<div class="g2">{% for f in row.fields %}{{ field(f) }}{% endfor %}</div>
+{% else %}
+{{ field(row.field, 'padding-left:24px' if row.indent else '') }}
+{% endif %}
+{% endfor %}
+</div>
+</section>
+
+<section class="step">
+<h2><span class="num">4</span>Update frequency</h2>
+<div style="display:flex;flex-direction:column;gap:10px">
+<label class="chk"><input type="radio" name="schedule" value="manual"{% if schedule == 'manual' %} checked{% endif %}><span><strong>Manual</strong> <span class="hint">· run from the portal when you choose</span></span></label>
+<label class="chk"><input type="radio" name="schedule" value="daily"{% if schedule == 'daily' %} checked{% endif %}><span><strong>Daily</strong> <span class="hint">· re-ingests only changed content</span></span></label>
+<label class="chk"><input type="radio" name="schedule" value="weekly"{% if schedule == 'weekly' %} checked{% endif %}><span><strong>Weekly</strong> <span class="hint">· re-ingests only changed content</span></span></label>
+{% if source %}<label class="chk" style="margin-top:6px"><input type="checkbox" name="enabled" value="on"{% if source.enabled %} checked{% endif %}><span><strong>Scheduled runs enabled</strong> <span class="hint">· untick to pause the schedule without changing it</span></span></label>{% endif %}
+</div>
+</section>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:24px;border-top:1px solid var(--bd);flex-wrap:wrap">
+<a class="btn" href="{{ base }}/{{ 'sources/%d' % source.id if source else 'sources' }}">Cancel</a>
+<button type="submit" class="btn">{{ 'Save' if source else 'Create source' }}</button>
+<button type="submit" class="btn pri" name="run_now" value="1">{{ 'Save and run now' if source else 'Create and run now' }}</button>
+</div>
+</form>
+
+<aside style="flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:16px" aria-label="Help">
+<div class="box">
+<div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+<strong>What happens next</strong>
+<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px" class="mut">
+<li>The portal fetches content through the connector.</li>
+<li>Anything unchanged since the last run is skipped.</li>
+<li>The rest goes to LightRAG for entity extraction, graph building and embeddings.</li>
+<li>Follow progress on the run page: found, sent, processed, failed.</li>
+</ol>
+</div>
+<div style="padding:12px 16px;border-top:1px solid var(--bd);background:var(--subtle);font-size:12px"><a href="{{ base }}/guides/{{ cls.type }}">{{ cls.label }} setup guide</a></div>
+</div>
+</aside>
+</main>
+{% endblock %}

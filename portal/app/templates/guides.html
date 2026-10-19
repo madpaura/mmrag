@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Guides{% endblock %}
+{% block css %}{% include "css/guides.css" %}
+.app .nav a{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:6px;color:var(--fg);position:relative;text-decoration:none}
+.app .nav a:hover{background:var(--btn-hov)}
+.app .nav a.on{background:var(--muted-bg);font-weight:600}
+.app .nav a.on::before{content:"";position:absolute;left:-8px;top:6px;bottom:6px;width:4px;border-radius:4px;background:var(--acc)}
+{% endblock %}
+{% block main %}
+<main style="max-width:1280px;margin:0 auto;padding:32px 24px;box-sizing:border-box;display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start">
+<aside style="flex:1 1 200px;max-width:240px;min-width:0;padding-left:8px;display:flex;flex-direction:column;gap:8px" aria-label="Guides">
+<strong class="mut" style="font-size:12px;padding:0 8px">Getting started</strong>
+<nav class="nav"><a class="{{ 'on' if current == 'overview' }}" href="{{ base }}/guides">How ingestion works</a></nav>
+<strong class="mut" style="font-size:12px;padding:8px 8px 0">Connectors</strong>
+<nav class="nav">
+{% for t, c in types.items() %}<a class="{{ 'on' if current == t }}" href="{{ base }}/guides/{{ t }}">{{ c.label }}</a>{% endfor %}
+</nav>
+<strong class="mut" style="font-size:12px;padding:8px 8px 0">Extending</strong>
+<nav class="nav"><a class="{{ 'on' if current == 'connectors' }}" href="{{ base }}/guides/connectors">Writing a connector</a></nav>
+</aside>
+
+<article class="md" style="flex:999 1 560px;min-width:0;max-width:820px">
+{{ guide_html|safe }}
+{% if current in types %}
+<p><a class="btn pri" href="{{ base }}/sources/new?type={{ current }}" style="color:#fff;text-decoration:none">Add a {{ types[current].label.split(' (')[0] }} source</a></p>
+{% endif %}
+</article>
+</main>
+{% endblock %}

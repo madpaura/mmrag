@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ run.id }}{% endblock %}
+{% block css %}{% include "css/run_detail.css" %}{% endblock %}
+{% block main %}
+<main class="wrap" style="display:flex;flex-direction:column;gap:24px">
+{% include "_flash.html" %}
+{% include "_run_body.html" %}
+</main>
+{% endblock %}

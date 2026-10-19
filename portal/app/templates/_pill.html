@@ -1,0 +1,7 @@
+{%- if not stats.ok -%}
+<span class="lbl bad" title="{{ stats.error }}"><span style="width:8px;height:8px;border-radius:50%;background:var(--bad)"></span>LightRAG unreachable</span>
+{%- elif stats.busy or stats.active -%}
+<span class="lbl warn"><span style="width:8px;height:8px;border-radius:50%;background:var(--warn)"></span>LightRAG processing{% if stats.active %} · {{ stats.active }}{% endif %}</span>
+{%- else -%}
+<span class="lbl ok"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>LightRAG idle</span>
+{%- endif -%}

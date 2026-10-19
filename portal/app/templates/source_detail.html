@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, kind_icon, hist_squares %}
+{% block title %}{{ src.name }}{% endblock %}
+{% block css %}{% include "css/source_detail.css" %}{% endblock %}
+{% block main %}
+<main class="wrap" style="display:flex;flex-direction:column;gap:24px">
+{% include "_flash.html" %}
+<div style="display:flex;flex-direction:column;gap:8px;padding-bottom:16px;border-bottom:1px solid var(--bd)">
+<nav class="mut" style="font-size:12px;display:flex;gap:6px" aria-label="Breadcrumb"><a href="{{ base }}/sources">Sources</a><span>/</span><span>{{ src.name }}</span></nav>
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+<h1 style="margin:0;font-size:32px;font-weight:400">{{ src.name }}</h1>
+<span class="lbl">{{ cls.label }}</span>
+<span class="lbl {{ src.health_cls }}">{% if src.health_cls == 'ok' %}{{ icon('ok', '', 'width:12px;height:12px') }}{% elif src.health_cls == 'warn' %}{{ icon('warn', '', 'width:12px;height:12px') }}{% elif src.health_cls == 'bad' %}{{ icon('bad', '', 'width:12px;height:12px') }}{% endif %}{{ src.health }}</span>
+{% if not src.enabled %}<span class="lbl warn">Schedule paused</span>{% endif %}
+<div style="flex:1"></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+<span id="testres" style="font-size:12px"></span>
+<button class="btn" hx-post="{{ base }}/sources/{{ src.id }}/test" hx-target="#testres" hx-indicator="#testres">{{ icon('link') }}Test connection</button>
+<a class="btn" href="{{ base }}/sources/{{ src.id }}/edit">{{ icon('pencil') }}Edit</a>
+<form class="inline" method="post" action="{{ base }}/sources/{{ src.id }}/run"><button class="btn pri"{% if active %} disabled title="A run is in progress"{% endif %}>{{ icon('play') }}Run now</button></form>
+</div>
+</div>
+<span class="mut">{{ src.docs }} document{{ '' if src.docs == 1 else 's' }} · {% if src.last %}last run <a href="{{ base }}/runs/{{ src.last.id }}">#{{ src.last.id }}</a> {{ src.last.text|lower }} {{ src.last.started_at|fmt_short }} UTC{% else %}never run{% endif %} · next run: {{ (src.next_run_at|fmt_short ~ ' UTC') if src.next_run_at and src.enabled else 'manual' }}</span>
+</div>
+
+<div class="layout">
+<div class="main">
+<div class="seg" role="tablist" aria-label="Source views">
+<button role="tab" class="{{ 'on' if view == 'runs' }}" data-view-btn="runs" aria-selected="{{ 'true' if view == 'runs' else 'false' }}">Runs<span class="cnt">{{ total_runs }}</span></button>
+<button role="tab" class="{{ 'on' if view == 'docs' }}" data-view-btn="docs" aria-selected="{{ 'true' if view == 'docs' else 'false' }}">Documents<span class="cnt">{{ src.docs }}</span></button>
+<button role="tab" class="{{ 'on' if view == 'config' }}" data-view-btn="config" aria-selected="{{ 'true' if view == 'config' else 'false' }}">Configuration</button>
+</div>
+
+<div data-view="runs"{% if view != 'runs' %} hidden{% endif %}>
+<div class="box" style="overflow-x:auto">
+<table class="tbl">
+<thead><tr><th>Run</th><th>Status</th><th class="num">Found</th><th class="num">New / changed</th><th class="num">Unchanged</th><th class="num">Processed</th><th class="num">Failed</th><th>Started</th></tr></thead>
+<tbody>
+{% for r in runs %}
+<tr><td><a href="{{ base }}/runs/{{ r.id }}" style="font-weight:600">#{{ r.id }}</a></td><td><span class="lbl {{ r.lbl }}">{{ r.short }}</span></td><td class="num">{{ r.discovered }}</td><td class="num">{{ r.submitted }}</td><td class="num">{{ r.unchanged }}</td><td class="num">{{ r.processed }}</td><td class="num" style="color:{{ 'var(--bad)' if r.failed else 'var(--mut)' }}">{{ r.failed }}</td><td class="mut" style="white-space:nowrap">{{ r.started_at|fmt_sec }}</td></tr>
+{% else %}
+<tr><td colspan="8" class="empty">No runs yet. Press <strong>Run now</strong> to ingest this source.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<div data-view="docs"{% if view != 'docs' %} hidden{% endif %}>
+<div class="box" id="srcdocs">
+<div class="bh"><input class="mono" aria-label="Filter documents" placeholder="Filter documents" data-filter="#srcdocs" style="flex:1;height:28px;padding:0 8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--fg)"><a href="{{ base }}/documents?source={{ src.id }}" style="font-size:12px">Open in Documents</a></div>
+{% for d in docs %}
+{% set st = v.doc_status(d.status) %}
+<div class="br" data-f="{{ d.title }} {{ d.file_source }}">
+{{ icon('file', 'mut') }}
+<div style="flex:1 1 260px;min-width:0"><div style="font-weight:600"><a href="{{ base }}/documents/{{ d.id }}" style="color:var(--fg)">{{ d.title }}</a></div><div class="mono mut" style="overflow-wrap:anywhere">{{ d.file_source }}</div>{% if d.error %}<div class="bad" style="font-size:12px;overflow-wrap:anywhere">{{ d.error[:200] }}</div>{% endif %}</div>
+<span class="lbl {{ st[1] }}">{{ st[0] }}</span>
+<span class="mut" style="font-size:12px;width:110px;text-align:right">{{ d.updated_at|fmt_short }}</span>
+<form class="inline" method="post" action="{{ base }}/documents/{{ d.id }}/delete" data-confirm="Delete {{ d.title }} from LightRAG?"><input type="hidden" name="back" value="/sources/{{ src.id }}?view=docs"><button class="btn sm" aria-label="Delete {{ d.title }}">{{ icon('trash') }}</button></form>
+</div>
+{% else %}
+<div class="br empty" style="justify-content:center">Nothing ingested yet.</div>
+{% endfor %}
+<div class="br empty" data-empty hidden style="justify-content:center">No documents match.</div>
+</div>
+</div>
+
+<div data-view="config"{% if view != 'config' %} hidden{% endif %}>
+<div class="box">
+<div class="bh"><strong style="flex:1">Connector settings</strong><a class="btn sm" href="{{ base }}/sources/{{ src.id }}/edit">Edit settings</a></div>
+<div style="padding:16px">
+<dl class="kv" style="font-size:14px;grid-template-columns:200px minmax(0,1fr)">
+{% for row in cfg_rows %}
+<dt>{{ row.label }}</dt><dd{% if row.mono and row.value %} class="mono"{% endif %} style="white-space:pre-line">{% if row.secret %}{{ row.value }} <span class="mut">(stored)</span>{% elif row.value %}{{ row.value }}{% else %}<span class="mut">—</span>{% endif %}</dd>
+{% endfor %}
+<dt>Update frequency</dt><dd>{{ src.schedule|title }}{% if not src.enabled %} <span class="mut">(paused)</span>{% endif %}</dd>
+</dl>
+</div>
+</div>
+</div>
+</div>
+
+<aside class="side" aria-label="Source details">
+<div class="sec">
+<h2>About</h2>
+<dl class="kv">
+<dt>Connector</dt><dd>{{ cls.label }}</dd>
+{% if src.config.get('space') %}<dt>Space</dt><dd class="mono">{{ src.config.space }}</dd>{% endif %}
+{% if src.config.get('roots') %}<dt>Root pages</dt><dd class="mono" style="white-space:pre-line">{{ src.config.roots }}</dd>{% endif %}
+{% if src.type == 'jira' %}<dt>Mode</dt><dd class="mono">{{ src.config.mode }}{% if src.config.mode == 'project' %} · {{ src.config.project }}{% endif %}</dd>{% endif %}
+<dt>Schedule</dt><dd>{{ src.schedule|title }} · <a href="{{ base }}/sources/{{ src.id }}/edit">change</a></dd>
+</dl>
+</div>
+<div class="sec">
+<h2>Run health</h2>
+{% if src.hist %}
+<div style="display:flex;gap:3px" role="img" aria-label="{{ src.hist_label }}">{{ hist_squares(src.hist, '20px') }}</div>
+{% set okc = src.hist|selectattr('kind', 'equalto', 'ok')|list|length %}
+<span class="mut" style="font-size:12px">{{ okc }} of the last {{ src.hist|length }} run{{ '' if src.hist|length == 1 else 's' }} completed cleanly.{% if src.last and src.last.kind == 'ok' %} The latest did.{% endif %}</span>
+{% else %}
+<span class="mut" style="font-size:12px">No runs yet.</span>
+{% endif %}
+</div>
+<div class="sec">
+<h2>Guide</h2>
+<a href="{{ base }}/guides/{{ src.type }}" style="font-size:12px">{{ cls.label }} setup guide</a>
+</div>
+<div class="sec">
+<h2 class="bad">Danger zone</h2>
+<div class="dz">
+<form class="br first" style="flex-direction:column;align-items:stretch;gap:6px" method="post" action="{{ base }}/sources/{{ src.id }}/purge" data-confirm="Delete all {{ src.docs }} document(s) of {{ src.name }} from LightRAG?">
+<strong style="font-size:12px">Delete ingested data</strong>
+<span class="mut" style="font-size:12px">Removes this source's {{ src.docs }} document{{ '' if src.docs == 1 else 's' }} from LightRAG. The source and its settings stay.</span>
+<button class="btn sm dng" style="align-self:flex-start"{% if active or not src.docs %} disabled{% endif %}>Delete data</button>
+</form>
+<form class="br" style="flex-direction:column;align-items:stretch;gap:6px" method="post" action="{{ base }}/sources/{{ src.id }}/delete" data-confirm="Remove {{ src.name }}?">
+<strong style="font-size:12px">Remove source</strong>
+<label style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" name="purge" value="1">Also delete its ingested data</label>
+<button class="btn sm dng" style="align-self:flex-start"{% if active %} disabled{% endif %}>Remove source</button>
+</form>
+</div>
+{% if active %}<span class="mut" style="font-size:12px">Available once the active run finishes.</span>{% endif %}
+</div>
+</aside>
+</div>
+</main>
+{% endblock %}

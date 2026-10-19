@@ -1,0 +1,88 @@
+services:
+  # PostgreSQL with PGVector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-raguser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-raganything}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raguser} -d ${POSTGRES_DATABASE:-raganything}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5-community
+    container_name: rag-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1g
+    volumes:
+      - neo4j_data:/data
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # LightRAG v1.5.2 — official image + VLM-skip patch from dgx-custom-v1.5.7 branch
+  # Source: ~/dgx/lightrag-src (branch: dgx-custom-v1.5.7), pushed to SSIR-MST/lightrag
+  rag-app:
+    image: ghcr.io/hkuds/lightrag:latest
+    container_name: rag-app
+    env_file: .env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "9621"
+      WORKING_DIR: "/app/data/rag_storage"
+      INPUT_DIR: "/app/data/inputs"
+      PROMPT_DIR: "/app/data/prompts"
+    volumes:
+      - ./inputs:/app/data/inputs
+      - ./rag_storage:/app/data/rag_storage
+      - ./prompts:/app/data/prompts
+      # Patch: VLM skip when disabled (commit c91b316f, branch dgx-custom-v1.5.7)
+      - ./patches/pipeline.py:/app/lightrag/pipeline.py:ro
+    ports:
+      - "9621:9621"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "8"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9621/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  neo4j_data:
+    driver: local

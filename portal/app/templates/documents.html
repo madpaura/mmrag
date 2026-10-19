@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Documents{% endblock %}
+{% block css %}{% include "css/documents.css" %}{% endblock %}
+{%- macro qs(st) -%}{{ base }}/documents?status={{ st }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if source %}&source={{ source }}{% endif %}{%- endmacro -%}
+{% block main %}
+<main class="wrap" style="display:flex;flex-direction:column;gap:16px">
+{% include "_flash.html" %}
+<form method="get" action="{{ base }}/documents" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+<input type="hidden" name="status" value="{{ status if status != 'all' else '' }}">
+<label style="flex:1 1 300px;display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);box-sizing:border-box">{{ icon('search', 'mut') }}<input name="q" value="{{ q }}" aria-label="Search documents" placeholder="Search by title or file name" style="border:0;outline:0;background:transparent;color:var(--fg);flex:1;font:inherit;min-width:0"></label>
+<label class="mut" style="display:flex;align-items:center;gap:6px;font-size:12px">Source<select class="inp" name="source" style="padding:0 8px" onchange="this.form.submit()"><option value="">All sources</option>{% for s in sources %}<option value="{{ s.id }}"{% if source == s.id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+<a class="btn" href="{{ base }}/files">{{ icon('upload') }}Upload documents</a>
+</form>
+
+<form class="box" method="post" action="{{ base }}/documents/bulk" id="docform">
+<input type="hidden" name="back" value="/documents?{{ request.query_params }}">
+<div class="bh">
+<div data-sel-none style="display:contents">
+<div class="st" role="tablist" aria-label="Status">
+<a role="tab" href="{{ qs('all') }}" class="{{ 'on' if status == 'all' }}"{% if status == 'all' %} aria-selected="true"{% endif %}>All<span class="cnt">{{ tabs.all }}</span></a>
+<a role="tab" href="{{ qs('processed') }}" class="{{ 'on' if status == 'processed' }}"{% if status == 'processed' %} aria-selected="true"{% endif %}>{{ icon('ok', 'ok') }}Processed<span class="cnt">{{ tabs.processed }}</span></a>
+<a role="tab" href="{{ qs('pending') }}" class="{{ 'on' if status == 'pending' }}"{% if status == 'pending' %} aria-selected="true"{% endif %}>Pending<span class="cnt">{{ tabs.pending }}</span></a>
+<a role="tab" href="{{ qs('failed') }}" class="{{ 'on' if status == 'failed' }}"{% if status == 'failed' %} aria-selected="true"{% endif %}>{% if tabs.failed %}{{ icon('bad', 'bad') }}{% endif %}Failed<span class="cnt">{{ tabs.failed }}</span></a>
+</div>
+<div style="flex:1"></div>
+<span class="mut" style="font-size:12px">Sort: Recently updated</span>
+</div>
+<div data-sel-some hidden style="display:contents">
+<strong data-sel-count>0 selected</strong>
+<button type="button" class="btn sm" data-sel-clear>Clear</button>
+<div style="flex:1"></div>
+<button class="btn sm" name="action" value="reingest" data-confirm="Re-ingest the selected documents? Their sources will run again.">{{ icon('retry') }}Re-ingest</button>
+<button class="btn sm dng" name="action" value="delete" data-confirm="Delete the selected documents from LightRAG?">{{ icon('trash') }}Delete from LightRAG</button>
+</div>
+</div>
+<div style="overflow-x:auto">
+<table class="tbl">
+<thead><tr><th style="width:32px"><input type="checkbox" aria-label="Select all" data-sel-all></th><th>Document</th><th>Source</th><th>Status</th><th>Updated</th><th style="width:40px"><span class="visually-hidden">Actions</span></th></tr></thead>
+<tbody>
+{% for d in docs %}
+{% set st = v.doc_status(d.status) %}
+<tr>
+<td><input type="checkbox" name="ids" value="{{ d.id }}" aria-label="Select {{ d.title }}" data-sel></td>
+<td><div style="display:flex;gap:10px;align-items:flex-start">{{ icon('file', 'mut', 'margin-top:2px') }}<div style="min-width:0"><div style="font-weight:600"><a href="{{ base }}/documents/{{ d.id }}" style="color:var(--fg)">{{ d.title }}</a></div><div class="mono mut" style="overflow-wrap:anywhere">{{ d.file_source }}</div>{% if d.error %}<div class="bad" style="font-size:12px;overflow-wrap:anywhere" title="{{ d.error }}">{{ d.error[:160] }}{{ '…' if d.error|length > 160 }}</div>{% endif %}</div></div></td>
+<td><a href="{{ base }}{{ '/files' if d.stype == 'files' else '/sources/%d' % d.source_id }}">{{ d.sname }}</a></td>
+<td><span class="lbl {{ st[1] }}">{{ st[0] }}</span></td>
+<td class="mut" style="white-space:nowrap">{{ d.updated_at|fmt_sec }}</td>
+<td><details class="menu"><summary class="btn sm" aria-label="Actions for {{ d.title }}" style="background:transparent;border-color:transparent">{{ icon('dots') }}</summary>
+<div class="menu-pop right">
+<a href="{{ base }}/documents/{{ d.id }}">View content</a>
+{% if d.url %}<a href="{{ d.url }}" target="_blank" rel="noopener">Open at source</a>{% endif %}
+{% if d.run_id %}<a href="{{ base }}/runs/{{ d.run_id }}">View run #{{ d.run_id }}</a>{% endif %}
+<hr>
+<button class="dng-item" formaction="{{ base }}/documents/{{ d.id }}/delete" formmethod="post" data-confirm="Delete {{ d.title }} from LightRAG?">Delete from LightRAG</button>
+</div></details></td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="empty">{% if q or source or status != 'all' %}No documents match.{% else %}Nothing ingested yet. <a href="{{ base }}/sources/new">Add a source</a> or <a href="{{ base }}/files">upload files</a>.{% endif %}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</form>
+<span class="mut" style="font-size:12px">Deleting removes the document and its chunks, entities and relations from LightRAG. The source can ingest it again on its next run.</span>
+</main>
+{% endblock %}

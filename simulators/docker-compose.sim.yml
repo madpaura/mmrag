@@ -1,0 +1,14 @@
+# Dev simulators. `docker compose -f simulators/docker-compose.sim.yml up -d`
+services:
+  atlassian:
+    build: .
+    command: python mock_atlassian.py --port 8090
+    ports: ["127.0.0.1:8090:8090"]
+  lightrag:
+    build: .
+    command: python mock_lightrag.py --port 9621
+    ports: ["127.0.0.1:9622:9621"]
+  llm:
+    build: .
+    command: python mock_llm.py --port 4001
+    ports: ["127.0.0.1:4001:4001"]

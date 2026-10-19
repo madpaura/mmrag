@@ -1,0 +1,64 @@
+{%- from "_icons.html" import icon -%}
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ project }}{% endblock %} · {{ project }} · mmrag</title>
+<script>try{var t=localStorage.getItem('mmrag-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark-pending')}catch(e){}</script>
+<style>
+html{scrollbar-gutter:stable;background:#fff}html.dark-pending{background:#0d1117}
+body{margin:0}
+a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
+{% block css %}{% include "css/overview.css" %}{% endblock %}
+</style>
+<link rel="icon" href="{{ base }}/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="{{ base }}/static/extra.css">
+<script src="{{ base }}/static/htmx.min.js"></script>
+</head>
+<body>
+<div class="app" id="app">
+<header class="hdr">
+{% block hdr %}
+<a href="{{ base }}/" aria-label="mmrag home" style="display:flex;align-items:center;gap:8px;color:var(--fg);text-decoration:none">
+{{ icon('logo', '', 'width:28px;height:28px;stroke-width:1.2') }}
+<span style="font-weight:600;font-size:16px">mmrag</span>
+</a>
+<form class="srch" action="{{ base }}/documents" method="get" role="search">{{ icon('search') }}<input name="q" aria-label="Search" placeholder="Search documents, runs, sources" id="gsearch"><span class="kbd">/</span></form>
+<div style="flex:1"></div>
+<span hx-get="{{ base }}/status-pill" hx-trigger="every 5s" hx-swap="innerHTML">{% include "_pill.html" %}</span>
+{% if tab != 'ask' %}<a class="btn sm" href="{{ base }}/ask">{{ icon('chat') }}Ask</a>{% endif %}
+<button class="ib" aria-label="Toggle dark mode" data-theme-toggle><span class="when-light">{{ icon('moon') }}</span><span class="when-dark">{{ icon('sun') }}</span></button>
+{% endblock %}
+</header>
+<div class="ph">
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+{{ icon('db', 'mut') }}
+<div style="font-size:20px;display:flex;align-items:center;gap:6px"><a href="{{ base }}/">mmrag</a><span class="mut">/</span>
+<details class="menu"><summary class="btn sm" style="font-size:20px;font-weight:600;height:32px;background:transparent;border-color:transparent;padding:0 4px">{{ project }}{{ icon('caret') }}</summary>
+<div class="menu-pop"><a href="{{ base }}/settings">Project settings</a><a href="{{ api_url }}/docs" target="_blank" rel="noopener">LightRAG API docs</a><a href="{{ api_url }}/webui/" target="_blank" rel="noopener">LightRAG web UI</a></div></details></div>
+<span class="lbl">LightRAG project</span>
+{% if tab in ('overview', 'sources', 'runs', 'documents') and not hide_actions %}
+<div style="flex:1"></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<a class="btn" href="{{ base }}/files">{{ icon('upload') }}Upload</a>
+<a class="btn pri" href="{{ base }}/sources/new">{{ icon('plus') }}New source</a>
+</div>
+{% endif %}
+</div>
+<nav class="tabs" aria-label="Project">
+{%- macro tablink(id, href, ic, label, count=None) %}
+<a class="tab{{ ' on' if tab == id }}" href="{{ base }}{{ href }}"{% if tab == id %} aria-current="page"{% endif %}>{{ icon(ic) }}{{ label }}{% if count is not none %}<span class="cnt">{{ count }}</span>{% endif %}</a>
+{%- endmacro %}
+{{ tablink('overview', '/', 'home', 'Overview') }}
+{{ tablink('sources', '/sources', 'db', 'Sources', nav.sources) }}
+{{ tablink('runs', '/runs', 'play', 'Runs', nav.runs) }}
+{{ tablink('documents', '/documents', 'file', 'Documents', nav.docs) }}
+{{ tablink('ask', '/ask', 'chat', 'Ask') }}
+{{ tablink('guides', '/guides', 'book', 'Guides') }}
+{{ tablink('settings', '/settings', 'sliders', 'Settings') }}
+</nav>
+</div>
+{% block main %}{% endblock %}
+</div>
+<script src="{{ base }}/static/app.js"></script>
+</body></html>

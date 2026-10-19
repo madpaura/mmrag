@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Upload documents{% endblock %}
+{% block css %}{% include "css/upload.css" %}{% endblock %}
+{% block main %}
+<main class="wrap" style="display:flex;flex-direction:column;gap:24px">
+{% include "_flash.html" %}
+<div style="display:flex;flex-direction:column;gap:4px">
+<nav class="mut" style="font-size:12px;display:flex;gap:6px" aria-label="Breadcrumb"><a href="{{ base }}/sources">Sources</a><span>/</span><span>{{ src.name }}</span></nav>
+<h1 style="margin:0;font-size:24px;font-weight:600">Upload documents</h1>
+<span class="mut">Files go to the <strong style="color:var(--fg)">{{ src.name }}</strong> source and are sent to LightRAG for indexing.</span>
+</div>
+
+<div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start">
+<form method="post" action="{{ base }}/files" enctype="multipart/form-data" style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px" id="upform">
+<input type="hidden" name="ingest" id="ingest" value="1">
+<label class="drop" data-existing='{{ existing|tojson }}' style="cursor:pointer">
+{{ icon('upload', 'mut', 'width:40px;height:40px;stroke-width:1') }}
+<strong style="font-size:16px">Drag files here to add them</strong>
+<span class="mut">or <span style="color:var(--acc)">choose your files</span></span>
+<span class="mut" style="font-size:12px">PDF, DOCX, PPTX, MD, TXT, or any format your LightRAG parser supports</span>
+<input type="file" id="files" name="files" multiple="multiple" style="position:absolute;width:1px;height:1px;opacity:0">
+</label>
+
+<div class="box" id="queue" hidden>
+<div class="bh"><strong style="flex:1">Ready to upload <span class="cnt" id="queueCount">0</span></strong><button type="button" class="btn sm" id="clearQueue">Clear</button></div>
+<div id="queueList"></div>
+<div class="br" style="justify-content:flex-end;background:var(--subtle)">
+<label style="display:flex;gap:6px;align-items:center;margin-right:auto;font-size:12px"><input type="checkbox" id="autoIngest" checked="checked">Start ingestion right after upload</label>
+<button type="submit" class="btn" id="uploadOnly">Upload only</button>
+<button type="submit" class="btn pri" id="uploadGo">{{ icon('upload') }}Upload and ingest</button>
+</div>
+</div>
+<template id="tplFile">{{ icon('file', 'mut') }}</template>
+<template id="tplWarn">{{ icon('warn', 'warn') }}</template>
+<template id="tplX">{{ icon('x') }}</template>
+
+{% if staged %}
+<div class="box">
+<div class="bh"><strong style="flex:1">Uploaded, not ingested yet <span class="cnt">{{ staged|length }}</span></strong>
+<button type="submit" class="btn sm pri" formaction="{{ base }}/files/staged/ingest" formnovalidate>{{ icon('play') }}Ingest {{ staged|length }} file{{ '' if staged|length == 1 else 's' }}</button></div>
+{% for f in staged %}
+<div class="br">
+{{ icon('file', 'mut') }}
+<div style="flex:1 1 240px;min-width:0"><div style="font-weight:600">{{ f.name }}</div><span class="mut" style="font-size:12px">{{ (f.size / 1024)|round(1) }} KB · {{ 'replaces the indexed version' if f.name in existing else 'new document' }}</span></div>
+<span class="lbl">Staged</span>
+<button type="submit" class="btn sm" formaction="{{ base }}/files/staged/remove" formnovalidate name="name" value="{{ f.name }}" aria-label="Remove {{ f.name }}" style="background:transparent;border-color:transparent">{{ icon('x') }}</button>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+</form>
+
+<aside style="flex:1 1 300px;min-width:0;display:flex;flex-direction:column" aria-label="Uploaded files">
+<div class="sec">
+<h2>Already uploaded</h2>
+<div class="box">
+{% for d in docs[:8] %}
+{% set st = v.doc_status(d.status) %}
+<div class="br{{ ' first' if loop.first }}">
+{{ icon('file', 'mut') }}
+<div style="flex:1;min-width:0"><div style="font-weight:600;overflow-wrap:anywhere"><a href="{{ base }}/documents/{{ d.id }}" style="color:var(--fg)">{{ d.title }}</a></div><span class="mut" style="font-size:12px">{{ d.updated_at|fmt_sec }}</span></div>
+<span class="lbl {{ st[1] }}">{{ st[0] }}</span>
+</div>
+{% else %}
+<div class="br first empty" style="justify-content:center">No files uploaded yet.</div>
+{% endfor %}
+</div>
+<a href="{{ base }}/documents?source={{ src.id }}" style="font-size:12px">See all documents</a>
+</div>
+<div class="sec">
+<h2>Good to know</h2>
+<ul class="mut" style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12px">
+<li>Same file name = new version. The old one is replaced, not duplicated.</li>
+<li>Each upload creates a run, so you can follow processing on the <a href="{{ base }}/runs?source={{ src.id }}">Runs</a> tab.</li>
+<li>Recurring content belongs in a <a href="{{ base }}/sources/new">Confluence or Jira source</a> instead.</li>
+</ul>
+</div>
+</aside>
+</div>
+</main>
+{% endblock %}

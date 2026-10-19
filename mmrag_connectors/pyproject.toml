@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mmrag-connectors"
+version = "0.1.0"
+description = "Data-source connectors (Confluence DC, Jira DC, files) and a LightRAG API client"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27", "beautifulsoup4>=4.12"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+# Third-party connectors register here (same group name) and appear in the portal automatically.
+[project.entry-points."mmrag.connectors"]
+confluence = "mmrag_connectors.confluence:ConfluenceConnector"
+jira = "mmrag_connectors.jira:JiraConnector"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mmrag_connectors = ["guides/*.md"]

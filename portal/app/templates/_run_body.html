@@ -1,0 +1,80 @@
+{%- from "_icons.html" import icon, kind_icon -%}
+<div id="runbody" style="display:flex;flex-direction:column;gap:24px"{% if active %} hx-get="{{ base }}/runs/{{ run.id }}/panel" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<div style="display:flex;flex-direction:column;gap:8px">
+<nav class="mut" style="font-size:12px;display:flex;gap:6px" aria-label="Breadcrumb"><a href="{{ base }}/runs">Runs</a><span>/</span><span>#{{ run.id }}</span></nav>
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+{{ kind_icon(run.kind, 'width:24px;height:24px') }}
+<h1 style="margin:0;font-size:24px;font-weight:400"><a href="{{ base }}{{ '/files' if run.stype == 'files' else '/sources/%d' % run.source_id }}" style="color:var(--fg);font-weight:600">{{ run.sname }}</a> <span class="mut">run #{{ run.id }}</span></h1>
+<span class="lbl {{ run.lbl }}">{{ run.text }}</span>
+<div style="flex:1"></div>
+<a class="btn" href="{{ base }}{{ '/files' if run.stype == 'files' else '/sources/%d' % run.source_id }}">View source</a>
+{% if active %}
+<form class="inline" method="post" action="{{ base }}/runs/{{ run.id }}/cancel" data-confirm="Cancel run #{{ run.id }}?"><button class="btn dng">{{ icon('stop') }}Cancel run</button></form>
+{% elif run.stype != 'files' %}
+<form class="inline" method="post" action="{{ base }}/runs/{{ run.id }}/rerun"><button class="btn{{ '' if failed_docs else ' pri' }}">{{ icon('retry') }}Re-run all</button></form>
+{% if failed_docs %}<form class="inline" method="post" action="{{ base }}/runs/{{ run.id }}/rerun" title="Failed documents are re-sent; unchanged ones are skipped"><button class="btn pri">{{ icon('retry') }}Retry {{ failed_docs }} failed</button></form>{% endif %}
+{% else %}
+<a class="btn pri" href="{{ base }}/files">{{ icon('upload') }}Upload again</a>
+{% endif %}
+</div>
+<div class="mut" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px">
+<span>Triggered {{ 'by schedule' if run.trigger == 'schedule' else 'manually' }}</span><span>Started <span class="mono">{{ run.started_at|fmt_full }} UTC</span></span>{% if run.finished_at %}<span>Finished <span class="mono">{{ run.finished_at|fmt_time }}</span></span>{% endif %}{% if log %}<span>Last log line <span class="mono">{{ log[-1].ts|fmt_time }}</span></span>{% endif %}
+</div>
+{% if run.error %}<div class="mono" style="padding:8px 12px;background:var(--bad-bg);border:1px solid var(--bad-bd);border-radius:6px;overflow-wrap:anywhere;color:var(--bad)">{{ run.error }}</div>{% endif %}
+</div>
+
+<section aria-labelledby="flow-h" style="display:flex;flex-direction:column;gap:12px">
+<h2 id="flow-h" style="margin:0;font-size:16px;font-weight:600">Pipeline</h2>
+<div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">
+<div class="stage"><span class="mut" style="font-size:12px">Found at source</span><span class="n">{{ run.discovered }}</span><span class="mut" style="font-size:12px">{{ unit }}</span></div>
+<span class="arrow" aria-hidden="true">{{ icon('arrow') }}</span>
+<div class="stage"><span class="mut" style="font-size:12px">Unchanged · skipped</span><span class="n neu">{{ run.unchanged }}</span><span class="mut" style="font-size:12px">same as last run</span></div>
+<span class="arrow" aria-hidden="true">{{ icon('arrow') }}</span>
+<div class="stage"><span class="mut" style="font-size:12px">Sent to LightRAG</span><span class="n">{{ run.submitted }}</span><span class="mut" style="font-size:12px">{{ new }} new · {{ replaced }} replaced · {{ run.deleted }} old removed</span></div>
+<span class="arrow" aria-hidden="true">{{ icon('arrow') }}</span>
+<div class="stage" style="flex-direction:row;gap:16px{{ ';border-color:var(--bad-bd)' if run.failed }}">
+<div style="display:flex;flex-direction:column;gap:2px"><span class="mut" style="font-size:12px">Processed</span><span class="n ok">{{ run.processed }}</span></div>
+<div style="display:flex;flex-direction:column;gap:2px"><span class="mut" style="font-size:12px">Failed</span><span class="n{{ ' bad' if run.failed }}">{{ run.failed }}</span></div>
+</div>
+</div>
+{% set denom = run.submitted if run.submitted else run.failed %}
+<div style="display:flex;align-items:center;gap:12px">
+<div style="flex:1;height:8px;border-radius:4px;background:var(--muted-bg);display:flex;overflow:hidden" role="img" aria-label="{{ finished }} of {{ denom }} finished in LightRAG">
+{% if denom %}<span style="width:{{ (100 * run.processed / denom)|round(1) }}%;background:var(--ok)"></span><span style="width:{{ (100 * run.failed / denom)|round(1) }}%;background:var(--bad)"></span>{% endif %}
+</div>
+<span class="mut" style="font-size:12px">{{ finished }} / {{ denom }} finished by LightRAG{% if active %} · {{ 'monitoring' if run.status == 'monitoring' else 'fetching' }}…{% endif %}</span></div>
+</section>
+
+{% if errors %}
+<section class="box" aria-labelledby="ann-h">
+<div class="bh"><h2 id="ann-h" style="margin:0;font-size:14px;font-weight:600;flex:1">Errors <span class="cnt">{{ errors|sum(attribute='files', start=[])|length }}</span></h2><span class="mut" style="font-size:12px">Grouped by message</span></div>
+{% for g in errors %}
+<div class="ann"{% if loop.first %} style="border-top:0"{% endif %}>
+{{ icon('bad', 'bad', 'margin-top:2px') }}
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px">
+<div><strong>{{ g.title }}</strong> <span class="mut">· {{ g.files|length }} document{{ '' if g.files|length == 1 else 's' }}</span></div>
+<div class="mono" style="padding:8px 12px;background:var(--subtle);border:1px solid var(--bd);border-radius:6px;overflow-wrap:anywhere;max-height:120px;overflow:auto">{{ g.detail }}</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap">{% for f in g.files[:12] %}<span class="lbl mono">{{ f }}</span>{% endfor %}{% if g.files|length > 12 %}<span class="lbl">+{{ g.files|length - 12 }} more</span>{% endif %}</div>
+<span class="mut" style="font-size:12px">{% if 'PGVector' in g.detail or 'APIConnection' in g.detail or 'embedding' in g.detail|lower %}Raised inside LightRAG (vector store / LLM connection), not by the connector. Check the LiteLLM and Postgres services, then retry.{% elif 'already exists' in g.detail or '409' in g.detail %}LightRAG already holds a document with this name.{% else %}Retry the run once the cause is fixed; only failed and changed documents are re-sent.{% endif %}</span>
+</div>
+</div>
+{% endfor %}
+</section>
+{% endif %}
+
+<section class="box" aria-labelledby="log-h">
+<div class="bh">
+<h2 id="log-h" style="margin:0;font-size:14px;font-weight:600;flex:1">Log</h2>
+<input class="mono" id="logq" hx-preserve="true" aria-label="Search log" placeholder="Search log" style="height:28px;padding:0 8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--fg);width:200px">
+<label class="toggle"><input type="checkbox" id="logerr" hx-preserve="true">Errors only</label>
+<button class="btn sm" aria-label="Copy log" data-copy-from="#log">{{ icon('copy') }}</button>
+</div>
+<div class="log" role="log" id="log">
+{% for l in log %}
+<div class="ln{{ ' err' if l.err }}"><span class="no">{{ l.no }}</span><span class="ts">{{ l.ts|fmt_time }}</span><span>{{ l.msg }}</span></div>
+{% else %}
+<div class="ln"><span class="no">–</span><span class="ts"></span><span>{{ 'Waiting for the first log line…' if active else 'No log lines.' }}</span></div>
+{% endfor %}
+</div>
+</section>
+</div>

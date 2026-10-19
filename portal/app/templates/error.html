@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ title }}{% endblock %}
+{% block main %}
+<main class="wrap" style="max-width:800px">
+<div class="box">
+<div class="bh">{{ icon('bad', 'bad') }}<h1 style="margin:0;font-size:16px;font-weight:600;flex:1">{{ title }}</h1></div>
+<div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+<div class="mono" style="padding:8px 12px;background:var(--subtle);border:1px solid var(--bd);border-radius:6px;overflow-wrap:anywhere">{{ message }}</div>
+{% if hint %}<span class="mut">{{ hint }}</span>{% endif %}
+<div style="display:flex;gap:8px"><a class="btn" href="javascript:history.back()">Back</a><a class="btn" href="{{ base }}/">Overview</a></div>
+</div>
+</div>
+</main>
+{% endblock %}

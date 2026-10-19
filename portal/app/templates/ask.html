@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Ask{% endblock %}
+{% block css %}{% include "css/ask.css" %}{% endblock %}
+{% block main %}
+<main class="wrap" style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start">
+<div style="flex:999 1 600px;min-width:0;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;flex-direction:column;gap:2px">
+<h1 style="margin:0;font-size:24px;font-weight:600">Ask the knowledge base</h1>
+<span class="mut">Query this project's LightRAG index: {{ stats.processed if stats.ok else nav.docs }} document{{ '' if (stats.processed if stats.ok else nav.docs) == 1 else 's' }} from {{ n_src }} source{{ '' if n_src == 1 else 's' }}.</span>
+</div>
+
+<form class="composer" method="post" action="{{ base }}/ask" id="askForm">
+<label for="q" class="visually-hidden">Question</label>
+<textarea id="q" name="q" placeholder="Ask a question about your documents" required>{{ q }}</textarea>
+<input type="hidden" name="mode" id="mode" value="{{ mode }}">
+<div class="cbar">
+<span class="mut" style="font-size:12px">Mode</span>
+<div class="modes" role="radiogroup" aria-label="Retrieval mode">
+{% for id, desc in modes %}<button type="button" role="radio" aria-checked="{{ 'true' if id == mode else 'false' }}" class="{{ 'on' if id == mode }}" data-mode="{{ id }}" data-desc="{{ desc }}">{{ id }}</button>{% endfor %}
+</div>
+<div style="flex:1"></div>
+<span class="kbd">Ctrl ↵</span>
+<button type="submit" class="btn pri" id="askBtn">{{ icon('send') }}Ask</button>
+</div>
+</form>
+<div style="display:flex;gap:8px;align-items:flex-start;font-size:12px" class="mut">{{ icon('info', '', 'margin-top:1px') }}<span><strong style="color:var(--fg)" class="mono" id="modeName">{{ mode }}</strong> · <span id="modeDesc">{{ mode_desc }}</span></span></div>
+
+{% if error %}
+<div class="flash bad" role="alert">{{ icon('bad', 'bad', 'margin-top:2px') }}<div style="flex:1;display:flex;flex-direction:column;gap:2px"><strong>LightRAG could not answer</strong><span class="mut mono" style="overflow-wrap:anywhere">{{ error }}</span></div></div>
+{% endif %}
+
+{% if answer is not none %}
+<section class="box" aria-labelledby="ans-h">
+<div class="bh">
+<h2 id="ans-h" style="margin:0;font-size:14px;font-weight:600;flex:1">Answer</h2>
+<span class="lbl mono">{{ mode }}</span>
+<button class="btn sm" aria-label="Copy answer" data-copy-from="#answer">{{ icon('copy') }}</button>
+</div>
+<div style="padding:16px;display:flex;flex-direction:column;gap:8px" class="answer" id="answer">{{ answer|safe }}</div>
+<div class="bh" style="border-top:1px solid var(--bd)"><strong style="font-size:12px;flex:1">References</strong><span class="mut" style="font-size:12px">documents the answer drew on</span></div>
+{% for ref in refs %}
+<div class="ref"{% if loop.first %} style="border-top:0"{% endif %}><span class="lbl">{{ ref.id or loop.index }}</span><div style="flex:1;min-width:0"><a href="{{ base }}{{ '/documents/%d' % ref.pk if ref.pk else '/documents?q=' ~ ref.file|urlencode }}" style="font-weight:600">{{ ref.title }}</a><div class="mono mut" style="overflow-wrap:anywhere">{{ ref.file }} · {{ ref.src }}</div></div></div>
+{% else %}
+<div class="ref" style="border-top:0"><span class="mut" style="font-size:12px">No references: LightRAG found no matching context for this question.</span></div>
+{% endfor %}
+<details>
+<summary style="padding:10px 16px;border-top:1px solid var(--bd);cursor:pointer;font-size:12px;font-weight:600">Use this query from code</summary>
+<pre class="code">curl -X POST {{ api_url }}/query \
+  -H "Content-Type: application/json" \
+  -d '{{ {"query": q, "mode": mode}|tojson }}'</pre>
+</details>
+</section>
+{% endif %}
+</div>
+
+<aside style="flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:16px" aria-label="Retrieval modes">
+<div class="box">
+<div class="bh"><strong style="font-size:14px">Which mode?</strong></div>
+{% for id, desc in modes %}
+<button type="button" data-mode="{{ id }}" data-desc="{{ desc }}" style="display:flex;flex-direction:column;gap:2px;align-items:flex-start;width:100%;padding:10px 16px;border:0;border-top:1px solid var(--bd);background:{{ 'var(--acc-bg)' if id == mode else 'transparent' }};color:var(--fg);font:inherit;text-align:left;cursor:pointer">
+<span style="display:flex;gap:8px;align-items:center"><strong class="mono" style="font-size:13px">{{ id }}</strong>{% if id == 'mix' %}<span class="lbl acc">default</span>{% endif %}</span>
+<span class="mut" style="font-size:12px">{{ desc }}</span>
+</button>
+{% endfor %}
+</div>
+</aside>
+</main>
+{% endblock %}

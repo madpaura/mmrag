@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.egg-info/
+projects/
+backups/
+config/global.env
+.portal-dev/
+.env
+.env.bak.*
+stack/lightrag.env.tmpl
+.pytest_cache/
+*.pyc
+data/
+portal/data/
+node_modules/
+.DS_Store
+# secrets: keys live only in these files
+*.env.local
+data-src/config/.env

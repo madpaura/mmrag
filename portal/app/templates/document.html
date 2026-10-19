@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, kind_icon %}
+{% block title %}{{ d.title }}{% endblock %}
+{% block css %}{% include "css/source_detail.css" %}
+{% include "css/guides.css" %}
+.doc-body{padding:24px 32px}
+.doc-pre{margin:0;padding:16px;background:var(--code);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.md pre{padding:12px 16px;background:var(--code);border-radius:6px;overflow:auto;font-size:12px}
+{% endblock %}
+{% block main %}
+<main class="wrap" style="display:flex;flex-direction:column;gap:24px">
+{% include "_flash.html" %}
+<div style="display:flex;flex-direction:column;gap:8px;padding-bottom:16px;border-bottom:1px solid var(--bd)">
+<nav class="mut" style="font-size:12px;display:flex;gap:6px;flex-wrap:wrap" aria-label="Breadcrumb"><a href="{{ base }}/documents">Documents</a><span>/</span><a href="{{ base }}{{ '/files' if d.stype == 'files' else '/sources/%d' % d.source_id }}">{{ d.sname }}</a><span>/</span><span>{{ d.title }}</span></nav>
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+{{ icon('file', 'mut', 'width:24px;height:24px') }}
+<h1 style="margin:0;font-size:24px;font-weight:600;overflow-wrap:anywhere">{{ d.title }}</h1>
+<span class="lbl {{ st[1] }}">{{ st[0] }}</span>
+<div style="flex:1"></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+{% if d.url %}<a class="btn" href="{{ d.url }}" target="_blank" rel="noopener">{{ icon('external') }}Open at source</a>{% endif %}
+{% if file %}<a class="btn" href="{{ base }}/documents/{{ d.id }}/raw?download=1">{{ icon('upload', '', 'transform:rotate(180deg)') }}Download</a>{% endif %}
+<form class="inline" method="post" action="{{ base }}/documents/{{ d.id }}/delete" data-confirm="Delete {{ d.title }} from LightRAG?"><input type="hidden" name="back" value="/documents"><button class="btn dng">{{ icon('trash') }}Delete from LightRAG</button></form>
+</div>
+</div>
+<span class="mono mut" style="overflow-wrap:anywhere">{{ d.file_source }}</span>
+</div>
+
+<div class="layout">
+<div class="main">
+{% if d.error %}
+<div class="flash bad" role="alert">{{ icon('bad', 'bad', 'margin-top:2px') }}<div style="flex:1;display:flex;flex-direction:column;gap:4px;min-width:0"><strong>LightRAG could not process this document</strong><span class="mono" style="overflow-wrap:anywhere;font-size:12px">{{ d.error }}</span></div></div>
+{% endif %}
+<section class="box" aria-labelledby="content-h">
+<div class="bh">
+<h2 id="content-h" style="margin:0;font-size:14px;font-weight:600;flex:1">Content sent to LightRAG</h2>
+{% if kind in ('markdown', 'text') %}<span class="mut" style="font-size:12px">{{ (size / 1024)|round(1) }} KB</span>
+<a class="btn sm" href="{{ base }}/documents/{{ d.id }}/raw" target="_blank" rel="noopener">Raw</a>
+<button class="btn sm" aria-label="Copy content" data-copy-from="#doc-content">{{ icon('copy') }}</button>{% endif %}
+</div>
+{% if kind == 'markdown' %}
+<article class="md doc-body" id="doc-content">{{ body|safe }}</article>
+{% elif kind == 'text' %}
+<pre class="doc-pre" id="doc-content">{{ body }}</pre>
+{% elif kind == 'binary' %}
+<div class="empty" style="display:flex;flex-direction:column;gap:12px;align-items:center">
+{{ icon('file', 'mut', 'width:40px;height:40px;stroke-width:1') }}
+<span><strong style="color:var(--fg)">{{ file.name }}</strong> · {{ (size / 1024)|round(1) }} KB</span>
+<span>LightRAG parsed this file itself; the portal can't preview this format.</span>
+<a class="btn" href="{{ base }}/documents/{{ d.id }}/raw?download=1">Download original</a>
+</div>
+{% else %}
+<div class="empty">No stored copy. This document was ingested before the portal kept copies.
+{% if d.stype != 'files' %}Select it on <a href="{{ base }}/documents?q={{ d.file_source|urlencode }}">Documents</a> and choose <strong>Re-ingest</strong> to store one.{% else %}Upload it again to store one.{% endif %}</div>
+{% endif %}
+</section>
+</div>
+
+<aside class="side" aria-label="Document details">
+<div class="sec">
+<h2>Details</h2>
+<dl class="kv">
+<dt>Source</dt><dd><a href="{{ base }}{{ '/files' if d.stype == 'files' else '/sources/%d' % d.source_id }}">{{ d.sname }}</a></dd>
+<dt>Status</dt><dd><span class="lbl {{ st[1] }}">{{ st[0] }}</span></dd>
+<dt>Updated</dt><dd>{{ d.updated_at|fmt_sec }} UTC</dd>
+<dt>Size</dt><dd>{{ (size / 1024)|round(1) }} KB</dd>
+{% if run %}<dt>Last run</dt><dd><a href="{{ base }}/runs/{{ run.id }}">#{{ run.id }}</a> · {{ run.short|lower }}</dd>{% endif %}
+</dl>
+</div>
+<div class="sec">
+<h2>In LightRAG</h2>
+<dl class="kv">
+<dt>File name</dt><dd class="mono">{{ d.file_source.rsplit('/', 1)[-1] }}</dd>
+<dt>Document id</dt><dd class="mono">{{ d.lightrag_doc_id or '—' }}</dd>
+<dt>Track id</dt><dd class="mono">{{ d.track_id or '—' }}</dd>
+</dl>
+<a href="{{ base }}/ask" style="font-size:12px">Ask a question about it</a>
+</div>
+{% if d.url %}
+<div class="sec">
+<h2>Origin</h2>
+<a href="{{ d.url }}" target="_blank" rel="noopener" class="mono" style="font-size:12px;overflow-wrap:anywhere">{{ d.url }}</a>
+<span class="mut" style="font-size:12px">The link opens the original in {{ v.TYPE_LABEL.get(d.stype, d.stype) }}. It only works if that server is reachable from your browser.</span>
+</div>
+{% endif %}
+</aside>
+</div>
+</main>
+{% endblock %}

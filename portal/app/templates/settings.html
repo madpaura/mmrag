@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Settings{% endblock %}
+{% block css %}{% include "css/settings.css" %}{% endblock %}
+{% block main %}
+<main style="max-width:1280px;margin:0 auto;padding:32px 24px;box-sizing:border-box;display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start">
+<aside style="flex:1 1 200px;max-width:256px;min-width:0;padding-left:8px;position:sticky;top:16px" aria-label="Settings sections">
+<nav class="nav" id="setnav">
+<a class="on" href="#general">{{ icon('sliders') }}General</a>
+<a href="#api">{{ icon('code') }}LightRAG API</a>
+<a href="#pipeline">{{ icon('play') }}Pipeline</a>
+<a href="#danger">{{ icon('warn') }}Danger zone</a>
+</nav>
+</aside>
+
+<div style="flex:999 1 560px;min-width:0;max-width:800px;display:flex;flex-direction:column;gap:40px">
+{% include "_flash.html" %}
+<section id="general" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">General</h2>
+<div class="fld"><label for="pn">Project</label><input id="pn" class="inp mono" readonly="readonly" value="{{ project }}" style="max-width:240px"><span class="hint">The project id in portal and API paths: <span class="mono">{{ (base[:-5] if base.endswith('/mgmt') else base) or '' }}/…</span></span></div>
+</section>
+
+<section id="api" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">LightRAG API</h2>
+<div class="fld"><label for="ep">Endpoint</label>
+<div style="display:flex;max-width:520px"><input id="ep" class="inp mono" readonly="readonly" value="{{ api_url }}" style="flex:1;border-radius:6px 0 0 6px;border-right:0;min-width:0"><button class="btn" style="border-radius:0 6px 6px 0" aria-label="Copy endpoint" data-copy-from="#ep">{{ icon('copy') }}</button></div>
+<span class="hint">Point other tools and agents at this URL. <a href="{{ api_url }}/docs" target="_blank" rel="noopener">Open API docs</a> · <a href="{{ api_url }}/webui/" target="_blank" rel="noopener">Open LightRAG web UI</a></span></div>
+</section>
+
+<section id="pipeline" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">Pipeline</h2>
+<div class="box">
+<form class="br first" method="post" action="{{ base }}/admin/cancel-pipeline" data-confirm="Stop the batch LightRAG is processing now?">
+<input type="hidden" name="back" value="/settings">
+<div style="flex:1 1 300px;display:flex;flex-direction:column;gap:2px"><strong>Cancel LightRAG pipeline</strong><span class="hint">Stops the batch LightRAG is processing now. Documents not yet processed are marked failed and can be retried.</span></div>
+{% if not stats.ok %}<span class="lbl bad">Unreachable</span>{% elif stats.busy %}<span class="lbl warn">Processing</span>{% else %}<span class="lbl ok">Idle</span>{% endif %}
+<button class="btn"{% if not stats.busy %} disabled{% endif %}>Cancel pipeline</button>
+</form>
+</div>
+</section>
+
+<section id="danger" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">Danger zone</h2>
+<div class="box dz">
+<form class="br first" method="post" id="purgeform" data-confirm="Delete every document of the selected source from LightRAG?">
+<input type="hidden" name="back" value="/settings">
+<div style="flex:1 1 300px;display:flex;flex-direction:column;gap:2px"><strong>Delete one source's data</strong><span class="hint">Removes every document a source ingested. The source keeps its settings.</span></div>
+<label class="visually-hidden" for="ds">Source</label>
+<select id="ds" class="inp" style="height:32px" onchange="document.getElementById('purgeform').action='{{ base }}/sources/'+this.value+'/purge'">
+{% for s in src_rows %}<option value="{{ s.id }}">{{ s.name }} · {{ s.n }} doc{{ '' if s.n == 1 else 's' }}</option>{% endfor %}
+</select>
+<button class="btn dng">Delete data</button>
+</form>
+<form class="br" style="align-items:flex-start" method="post" action="{{ base }}/admin/clear" data-confirm="Clear ALL data of {{ project }} from LightRAG? This can't be undone.">
+<div style="flex:1 1 300px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;flex-direction:column;gap:2px"><strong>Clear all data</strong><span class="hint">Deletes everything ingested into this project's LightRAG: {{ nav.docs }} document{{ '' if nav.docs == 1 else 's' }} and their chunks, entities and relations. Sources and run history stay. This can't be undone.</span></div>
+<label for="cf" style="font-size:12px">Type <strong class="mono">{{ project }}</strong> to confirm</label>
+<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="cf" name="confirm" class="inp mono" autocomplete="off" style="width:200px" data-confirm-value="{{ project }}" data-confirm-target="#clearbtn"><button id="clearbtn" class="btn dng" disabled>Clear all data</button></div>
+</div>
+</form>
+</div>
+</section>
+</div>
+</main>
+<script>
+(function(){var f=document.getElementById('purgeform'),s=document.getElementById('ds');if(f&&s)f.action='{{ base }}/sources/'+s.value+'/purge';
+var links=document.querySelectorAll('#setnav a');function upd(){var y=window.scrollY+120,cur=links[0];links.forEach(function(a){var t=document.querySelector(a.getAttribute('href'));if(t&&t.offsetTop<=y)cur=a;});links.forEach(function(a){a.classList.toggle('on',a===cur)});}
+var lock=0;links.forEach(function(a){a.addEventListener('click',function(){links.forEach(function(x){x.classList.toggle('on',x===a)});lock=Date.now();});});
+window.addEventListener('scroll',function(){if(Date.now()-lock>800)upd();},{passive:true});upd();})();
+</script>
+{% endblock %}
