@@ -80,6 +80,7 @@
 <button class="btn sm" style="border-radius:0 6px 6px 0" aria-label="Copy endpoint" data-copy-from="#apiurl">{{ icon('copy') }}</button>
 </div>
 <a href="{{ api_url }}/docs" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:6px;font-size:12px">{{ icon('external') }}Open API docs</a>
+<a href="{{ base }}/settings#access" style="font-size:12px">Access key for scripts</a>
 </div>
 <div class="sec" id="pipeline" hx-get="{{ base }}/?_=pipe" hx-trigger="every 5s" hx-select="#pipeline" hx-swap="outerHTML">
 <h2>Pipeline</h2>

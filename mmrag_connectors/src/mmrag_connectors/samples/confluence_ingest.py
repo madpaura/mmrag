@@ -2,6 +2,7 @@
 """Ingest Confluence (Data Center) pages into a LightRAG project.
 
     pip install "{{PACKAGE_URL}}"
+    export LIGHTRAG_API_KEY=...          # this project's access key (portal > Settings > Access)
     export CONFLUENCE_TOKEN=...          # personal access token (Confluence > Settings > Personal Access Tokens)
     python confluence_ingest.py --base-url https://confluence.example.com --root 123456 --depth 2
 
@@ -29,7 +30,7 @@ def main() -> int:
     ap.add_argument("--space", help="space key: ingest every page of the space")
     ap.add_argument("--depth", type=int, default=2, help="levels below each root (1 = root only)")
     ap.add_argument("--lightrag-url", default=os.getenv("LIGHTRAG_URL", LIGHTRAG_URL))
-    ap.add_argument("--api-key", default=os.getenv("LIGHTRAG_API_KEY"))
+    ap.add_argument("--api-key", default=os.getenv("LIGHTRAG_API_KEY"), help="project access key (default: $LIGHTRAG_API_KEY)")
     ap.add_argument("--state", default=".confluence_ingest_state.json", help="remembers content hashes between runs")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-wait", action="store_true")
@@ -51,9 +52,12 @@ def main() -> int:
     # 2. connect to LightRAG
     lr = LightRAGClient(a.lightrag_url, a.api_key)
     try:
-        lr.health()
+        lr.status_counts()                         # needs a valid key (unlike /health)
     except LightRAGError as e:
-        print("Cannot reach LightRAG:", e)
+        if e.status in (401, 403):
+            print("LightRAG rejected the access key: set $LIGHTRAG_API_KEY (portal > Settings > Access) or --api-key")
+        else:
+            print("Cannot reach LightRAG:", e)
         return 1
 
     # 3. fetch pages and ingest new / changed ones

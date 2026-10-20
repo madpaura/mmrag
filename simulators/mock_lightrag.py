@@ -16,8 +16,17 @@ import uvicorn
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
 DELAY = float(os.getenv("MOCK_DELAY", "2"))
+API_KEY = os.getenv("MOCK_API_KEY")  # when set, behave like LIGHTRAG_API_KEY + WHITELIST_PATHS=/health
 DOCS: dict[str, dict] = {}
 app = FastAPI(title="mock-lightrag")
+
+
+@app.middleware("http")
+async def api_key_guard(request: Request, call_next):
+    from fastapi.responses import JSONResponse
+    if API_KEY and request.url.path != "/health" and request.headers.get("x-api-key") != API_KEY:
+        return JSONResponse({"detail": "No credentials provided. Please login."}, status_code=401)
+    return await call_next(request)
 
 
 def status(d) -> str:

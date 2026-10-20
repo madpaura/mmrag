@@ -9,6 +9,8 @@
 #   ./setup.sh backup  <proj>           full cold backup -> backups/<proj>-<ts>.tar.gz
 #   ./setup.sh restore <proj> <archive> sanity-check archive, then restore everything
 #   ./setup.sh destroy <proj>           stop and DELETE all data of a project
+#   ./setup.sh key        <proj>        show the project's access key (API key = portal password)
+#   ./setup.sh rotate-key <proj>        replace the key everywhere (LightRAG, portal, nginx)
 #
 # Global settings (env or config/global.env):
 #   BASE_URL (http://mydomain.com)  URL_ROOT (/mmrag)  NGINX_CONF_DIR (/etc/nginx/mmrag.d)
@@ -38,6 +40,7 @@ dc()    { local p="$1"; shift; docker compose --project-directory "$(pdir "$p")"
 envget(){ grep -E "^$2=" "$1" | tail -1 | cut -d= -f2-; }
 envset(){ if grep -qE "^$2=" "$1"; then sed -i "s|^$2=.*|$2=$3|" "$1"; else echo "$2=$3" >> "$1"; fi; }
 rand()  { head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24; }
+randkey(){ printf 'mmr_%s' "$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"; }
 port_free() { ! (ss -ltnH 2>/dev/null || netstat -ltn 2>/dev/null) | awk '{print $4}' | grep -qE "[:.]$1\$"; }
 used_ports(){ cat "$PROJECTS"/*/.env 2>/dev/null | grep -E '^(LIGHTRAG|PORTAL)_PORT=' | cut -d= -f2; }
 next_port() { local p=$PORT_BASE; while used_ports | grep -qx "$p" || ! port_free "$p"; do p=$((p+1)); done; echo "$p"; }
@@ -48,7 +51,7 @@ check() {
   command -v docker >/dev/null && ok "docker $(docker --version | awk '{print $3}' | tr -d ,)" || { warn "docker missing"; bad=1; }
   docker info >/dev/null 2>&1 && ok "docker daemon reachable" || { warn "cannot talk to docker daemon (permissions?)"; bad=1; }
   docker compose version >/dev/null 2>&1 && ok "docker compose v2" || { warn "docker compose v2 missing"; bad=1; }
-  for t in curl tar sha256sum; do command -v $t >/dev/null && ok "$t" || { warn "$t missing"; bad=1; }; done
+  for t in curl tar sha256sum openssl; do command -v $t >/dev/null && ok "$t" || { warn "$t missing"; bad=1; }; done
   [[ -f "$ROOT/patches/pipeline.py" ]] && ok "LightRAG patch present" || { warn "patches/pipeline.py missing"; bad=1; }
   if [[ ! -f "$ROOT/stack/lightrag.env.tmpl" && -f "$ROOT/stack/lightrag.env.tmpl.example" ]]; then
     cp "$ROOT/stack/lightrag.env.tmpl.example" "$ROOT/stack/lightrag.env.tmpl"
@@ -69,22 +72,61 @@ check() {
 }
 
 # ---------------------------------------------------------------- deploy
+# One secret per project: LIGHTRAG_API_KEY. LightRAG enforces it (X-API-Key); nginx accepts the same key as the
+# basic-auth password (user = project name) for browsers and then forwards the key to LightRAG.
+ensure_key() {
+  local d; d="$(pdir "$1")"
+  if [[ -z "$(envget "$d/.env" LIGHTRAG_API_KEY 2>/dev/null)" ]]; then
+    envset "$d/.env" LIGHTRAG_API_KEY "$(randkey)"
+    ok "generated access key for $1 (show it with: ./setup.sh key $1)"
+  fi
+  [[ -n "$(envget "$d/.env" MMRAG_SESSION 2>/dev/null)" ]] || envset "$d/.env" MMRAG_SESSION "$(randkey)"   # browser cookie
+  # only the health check stays open. LightRAG matches the *prefixed* path when LIGHTRAG_API_PREFIX is set, so list
+  # both forms. (Its default "/health,/api/*" would also leave the Ollama-compatible /api/* chat API open.)
+  envset "$d/.env" WHITELIST_PATHS "/health,$(envget "$d/.env" API_PREFIX)/health"
+  chmod 600 "$d/.env"
+}
+
 write_nginx() {
-  local p="$1" d; d="$(pdir "$p")"
+  local p="$1" d key; d="$(pdir "$p")"; key="$(envget "$d/.env" LIGHTRAG_API_KEY)"
+  [[ -n "$key" ]] || die "no LIGHTRAG_API_KEY in $d/.env"
   sed -e "s|__PROJECT__|$p|g" -e "s|__BASE_URL__|$BASE_URL|g" \
       -e "s|__API_PREFIX__|$(envget "$d/.env" API_PREFIX)|g" -e "s|__MGMT_PREFIX__|$(envget "$d/.env" MGMT_PREFIX)|g" \
       -e "s|__LIGHTRAG_PORT__|$(envget "$d/.env" LIGHTRAG_PORT)|g" -e "s|__PORTAL_PORT__|$(envget "$d/.env" PORTAL_PORT)|g" \
+      -e "s|__API_KEY__|$key|g" -e "s|__HTPASSWD__|$NGINX_CONF_DIR/$p.htpasswd|g" \
+      -e "s|__SESSION__|$(envget "$d/.env" MMRAG_SESSION)|g" -e "s|__COOKIE__|mmrag_${p//-/_}|g" -e "s|__URL_ROOT__|$URL_ROOT|g" \
       "$ROOT/stack/nginx.tmpl.conf" > "$d/nginx.conf"
+  printf '%s:%s\n' "$p" "$(openssl passwd -apr1 "$key")" > "$d/htpasswd"
+  chmod 600 "$d/nginx.conf" "$d/htpasswd"
   install_nginx "$p"
 }
 
 install_nginx() {
   local p="$1"
-  command -v nginx >/dev/null || { warn "nginx missing; copy $(pdir "$p")/nginx.conf manually"; return 0; }
+  command -v nginx >/dev/null || { warn "nginx missing; install $(pdir "$p")/nginx.conf and htpasswd manually"; return 0; }
   [[ -d "$NGINX_CONF_DIR" ]] || { sudo_if_needed "$(dirname "$NGINX_CONF_DIR")"; $SUDO mkdir -p "$NGINX_CONF_DIR"; }
   sudo_if_needed "$NGINX_CONF_DIR"
-  $SUDO cp "$(pdir "$p")/nginx.conf" "$NGINX_CONF_DIR/$p.conf"
+  $SUDO install -m 0640 "$(pdir "$p")/nginx.conf" "$NGINX_CONF_DIR/$p.conf"      # holds the key: root/nginx only
+  $SUDO install -m 0644 "$(pdir "$p")/htpasswd" "$NGINX_CONF_DIR/$p.htpasswd"    # hash only; workers must read it
   reload_nginx
+}
+
+show_key() {
+  local p="$1" d; need_proj "$p"; d="$(pdir "$p")"
+  echo "project : $p"
+  echo "key     : $(envget "$d/.env" LIGHTRAG_API_KEY)"
+  echo "API     : curl -H 'X-API-Key: <key>' $(envget "$d/.env" LIGHT_RAG_URL)/documents/status_counts"
+  echo "portal  : $(envget "$d/.env" LIGHT_RAG_MGMT_URL)/   (user: $p, password: <key>)"
+}
+
+rotate_key() {
+  local p="$1" d; need_proj "$p"; d="$(pdir "$p")"
+  envset "$d/.env" LIGHTRAG_API_KEY "$(randkey)"
+  envset "$d/.env" MMRAG_SESSION "$(randkey)"     # also signs out every browser
+  dc "$p" up -d rag-app portal          # both read the key from .env
+  write_nginx "$p"
+  wait_healthy "$p" || warn "services not healthy yet"
+  ok "new key for $p — scripts and browsers must use it now:"; show_key "$p"
 }
 
 reload_nginx() {
@@ -123,12 +165,14 @@ deploy() {
   check || die "prerequisites failed (see above)"
   mkdir -p "$d"
   [[ -f "$d/.env" ]] || init_project "$p"
+  ensure_key "$p"
   cp "$ROOT/stack/docker-compose.yml" "$d/docker-compose.yml"
   dc "$p" config -q || die "compose config invalid"
   dc "$p" up -d --build --remove-orphans
   write_nginx "$p"
   wait_healthy "$p" || warn "not all services healthy yet — check: ./setup.sh status $p"
   echo; ok "project $p:"; echo "   API:  $(envget "$d/.env" LIGHT_RAG_URL)/"; echo "   Mgmt: $(envget "$d/.env" LIGHT_RAG_MGMT_URL)/"
+  echo "   Access: user '$p' / the project key  (./setup.sh key $p)"
 }
 
 wait_healthy() {
@@ -170,6 +214,7 @@ backup() {
     ok "volume $v"
   done
   cp -a "$d/.env" "$d/docker-compose.yml" "$d/prompts" "$work/config/" ; [[ -f "$d/nginx.conf" ]] && cp "$d/nginx.conf" "$work/config/"
+  [[ -f "$d/htpasswd" ]] && cp "$d/htpasswd" "$work/config/"
   cp "$ROOT/patches/pipeline.py" "$work/config/pipeline.py"
   { echo "project=$p"; echo "created=$ts"; echo "host=$(hostname)"; echo "format=1"
     echo "lightrag_image=$(docker inspect --format '{{.Config.Image}}' "$(dc "$p" ps -aq rag-app 2>/dev/null | head -1)" 2>/dev/null || true)"; } > "$work/MANIFEST"
@@ -207,6 +252,7 @@ restore() {
     envset "$d/.env" LIGHT_RAG_URL "$BASE_URL$URL_ROOT/$p/api"; envset "$d/.env" LIGHT_RAG_MGMT_URL "$BASE_URL$URL_ROOT/$p/mgmt"
     envset "$d/.env" LIGHTRAG_PORT "$lp"; envset "$d/.env" PORTAL_PORT "$pp"
   fi
+  ensure_key "$p"
   dc "$p" create
   for v in "${VOLUMES[@]}"; do
     docker run --rm -v "$(vol "$p" "$v")":/v -v "$work/volumes":/in:ro alpine sh -c "rm -rf /v/* /v/.[!.]* 2>/dev/null; tar -C /v -xzf /in/$v.tar.gz"
@@ -222,7 +268,7 @@ destroy() {
   local p="$1"; need_proj "$p"
   read -r -p "DELETE all data of '$p'? Type the project name: " ans; [[ "$ans" == "$p" ]] || die "aborted"
   dc "$p" down -v
-  if [[ -f "$NGINX_CONF_DIR/$p.conf" ]]; then sudo_if_needed "$NGINX_CONF_DIR"; $SUDO rm -f "$NGINX_CONF_DIR/$p.conf"; command -v nginx >/dev/null && reload_nginx; fi
+  if [[ -f "$NGINX_CONF_DIR/$p.conf" ]]; then sudo_if_needed "$NGINX_CONF_DIR"; $SUDO rm -f "$NGINX_CONF_DIR/$p.conf" "$NGINX_CONF_DIR/$p.htpasswd"; command -v nginx >/dev/null && reload_nginx; fi
   rm -rf "$(pdir "$p")"; ok "destroyed $p"
 }
 
@@ -236,5 +282,7 @@ case "$cmd" in
   backup)  backup "${1:-}" ;;
   restore) [[ -n "${1:-}" && -n "${2:-}" ]] || die "usage: setup.sh restore <proj> <archive>"; restore "$1" "$2" ;;
   destroy) destroy "${1:-}" ;;
-  *) sed -n '2,15p' "$0" ;;
+  key)     show_key "${1:-}" ;;
+  rotate-key) rotate_key "${1:-}" ;;
+  *) sed -n '2,17p' "$0" ;;
 esac

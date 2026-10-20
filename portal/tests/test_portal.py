@@ -358,3 +358,36 @@ def test_samples_run_end_to_end(stack, tmp_path):
     assert out.returncode == 0 and "1 queued, 1 unchanged" in out.stdout, out.stdout + out.stderr
     srcs = [d["src"] for d in stack.lightrag.DOCS.values()]
     assert len(srcs) == len(set(srcs)) == 7  # 5 pages + 2 issues, the changed issue replaced, not duplicated
+
+
+def test_project_key_enforced_end_to_end(stack, tmp_path):
+    """With a project key: LightRAG rejects keyless calls, the portal still works (it sends the key),
+    Settings shows it, and the samples work only with the key."""
+    import subprocess, sys as _sys, httpx
+    lrmod = stack.lightrag
+    lrmod.API_KEY = "mmr_testkey123"
+    stack.app.state.settings.lightrag_api_key = "mmr_testkey123"
+    try:
+        lr = stack.app.state.settings.lightrag_url
+        assert httpx.get(lr + "/documents/status_counts").status_code == 401
+        assert httpx.get(lr + "/health").status_code == 200
+        sid = add_confluence(stack, depth="1")
+        assert run(stack, sid)["processed"] == 1            # the portal authenticates itself
+        page = stack.get(f"{B}/settings").text
+        assert 'value="mmr_testkey123"' in page and 'type="password"' in page
+        f = tmp_path / "jira_ingest.py"
+        f.write_text(stack.get(f"{B}/downloads/samples/jira_ingest.py").text)
+        base = [_sys.executable, str(f), "--base-url", stack.atlassian + "/jira", "--keys", "SIM-6",
+                "--lightrag-url", lr, "--state", str(tmp_path / "s.json")]
+        env = {"PATH": "/usr/bin:/bin", "JIRA_TOKEN": "sim-token"}
+        bad = subprocess.run(base, capture_output=True, text=True, env=env, timeout=60)
+        assert bad.returncode == 1 and "rejected the access key" in bad.stdout, bad.stdout
+        good = subprocess.run(base, capture_output=True, text=True, env={**env, "LIGHTRAG_API_KEY": "mmr_testkey123"}, timeout=120)
+        assert good.returncode == 0 and "done" in good.stdout, good.stdout + good.stderr
+    finally:
+        lrmod.API_KEY = None
+
+
+def test_settings_warns_when_unprotected(stack):
+    stack.app.state.settings.lightrag_api_key = None
+    assert "This project is not protected" in stack.get(f"{B}/settings").text

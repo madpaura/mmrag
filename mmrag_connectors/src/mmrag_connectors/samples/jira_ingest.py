@@ -2,6 +2,7 @@
 """Ingest Jira (Data Center) issues into a LightRAG project.
 
     pip install "{{PACKAGE_URL}}"
+    export LIGHTRAG_API_KEY=...          # this project's access key (portal > Settings > Access)
     export JIRA_TOKEN=...                # personal access token (Jira > Profile > Personal Access Tokens)
     python jira_ingest.py --base-url https://jira.example.com --project ABC
     python jira_ingest.py --base-url https://jira.example.com --jql 'project = ABC AND updated >= -7d'
@@ -35,7 +36,7 @@ def main() -> int:
     ap.add_argument("--no-comments", action="store_true")
     ap.add_argument("--max-issues", type=int, default=1000)
     ap.add_argument("--lightrag-url", default=os.getenv("LIGHTRAG_URL", LIGHTRAG_URL))
-    ap.add_argument("--api-key", default=os.getenv("LIGHTRAG_API_KEY"))
+    ap.add_argument("--api-key", default=os.getenv("LIGHTRAG_API_KEY"), help="project access key (default: $LIGHTRAG_API_KEY)")
     ap.add_argument("--state", default=".jira_ingest_state.json", help="remembers content hashes between runs")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-wait", action="store_true")
@@ -60,9 +61,12 @@ def main() -> int:
     # 2. connect to LightRAG
     lr = LightRAGClient(a.lightrag_url, a.api_key)
     try:
-        lr.health()
+        lr.status_counts()                         # needs a valid key (unlike /health)
     except LightRAGError as e:
-        print("Cannot reach LightRAG:", e)
+        if e.status in (401, 403):
+            print("LightRAG rejected the access key: set $LIGHTRAG_API_KEY (portal > Settings > Access) or --api-key")
+        else:
+            print("Cannot reach LightRAG:", e)
         return 1
 
     # 3. fetch issues and ingest new / changed ones

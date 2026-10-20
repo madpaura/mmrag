@@ -7,6 +7,7 @@
 <aside style="flex:1 1 200px;max-width:256px;min-width:0;padding-left:8px;position:sticky;top:16px" aria-label="Settings sections">
 <nav class="nav" id="setnav">
 <a class="on" href="#general">{{ icon('sliders') }}General</a>
+<a href="#access">{{ icon('link') }}Access</a>
 <a href="#api">{{ icon('code') }}LightRAG API</a>
 <a href="#pipeline">{{ icon('play') }}Pipeline</a>
 <a href="#danger">{{ icon('warn') }}Danger zone</a>
@@ -18,6 +19,34 @@
 <section id="general" style="display:flex;flex-direction:column;gap:16px">
 <h2 class="st">General</h2>
 <div class="fld"><label for="pn">Project</label><input id="pn" class="inp mono" readonly="readonly" value="{{ project }}" style="max-width:240px"><span class="hint">The project id in portal and API paths: <span class="mono">{{ (base[:-5] if base.endswith('/mgmt') else base) or '' }}/…</span></span></div>
+</section>
+
+<section id="access" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">Access</h2>
+{% if api_key %}
+<span class="hint" style="font-size:14px">One key protects this project. Scripts send it as the <span class="mono">X-API-Key</span> header; in a browser it is the password for the portal and the LightRAG web UI. Other projects' keys don't work here.</span>
+<div class="g2" style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px;max-width:720px">
+<div class="fld"><label for="un">Username</label><input id="un" class="inp mono" readonly value="{{ project }}"></div>
+<div class="fld"><label for="key">Access key</label>
+<div style="display:flex"><input id="key" class="inp mono" type="password" readonly value="{{ api_key }}" style="flex:1;border-radius:6px 0 0 6px;border-right:0;min-width:0">
+<button class="btn" style="border-radius:0;border-right:0" type="button" onclick="var k=document.getElementById('key');k.type=k.type==='password'?'text':'password';this.textContent=k.type==='password'?'Show':'Hide'">Show</button>
+<button class="btn" style="border-radius:0 6px 6px 0" aria-label="Copy key" data-copy-from="#key">{{ icon('copy') }}</button></div></div>
+</div>
+<div class="box" style="max-width:800px">
+<div class="br first" style="flex-direction:column;align-items:stretch;gap:6px">
+<strong>Use it</strong>
+<pre class="mono" style="margin:0;padding:10px 12px;background:var(--subtle);border:1px solid var(--bd);border-radius:6px;overflow-x:auto;font-size:12px">export LIGHTRAG_API_KEY='&lt;access key&gt;'
+curl -H "X-API-Key: $LIGHTRAG_API_KEY" {{ api_url }}/documents/status_counts
+python jira_ingest.py --base-url https://jira.example.com --project ABC   # samples read $LIGHTRAG_API_KEY</pre>
+</div>
+<div class="br" style="flex-direction:column;align-items:stretch;gap:2px">
+<strong>Rotate the key</strong>
+<span class="hint">On the server: <span class="mono">./setup.sh rotate-key {{ project }}</span>. LightRAG, this portal and nginx switch to the new key at once; share it again with the team and update scripts.</span>
+</div>
+</div>
+{% else %}
+<div class="flash warn">{{ icon('warn', 'warn', 'margin-top:2px') }}<div style="flex:1;display:flex;flex-direction:column;gap:2px"><strong>This project is not protected</strong><span class="mut">Anyone who knows its URL can query and change its data. Redeploy with <span class="mono">./setup.sh deploy {{ project }}</span> to generate an access key.</span></div></div>
+{% endif %}
 </section>
 
 <section id="api" style="display:flex;flex-direction:column;gap:16px">

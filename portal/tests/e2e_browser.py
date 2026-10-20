@@ -1,5 +1,6 @@
-# Run: python portal/tests/e2e_browser.py <screenshot-dir>   (needs: pip install playwright; a fresh project "t3"
-# behind nginx on 127.0.0.1:18088, simulators/mock_atlassian.py on :8090 and mock_llm.py on :4001)
+# Run: MMRAG_KEY=$(./setup.sh key t3 | awk '/^key/{print $3}') python portal/tests/e2e_browser.py <screenshot-dir>
+#   needs: pip install playwright; a fresh project "t3" behind nginx on 127.0.0.1:18088,
+#   simulators/mock_atlassian.py on :8090 and mock_llm.py on :4001
 """End-to-end browser test of the mmrag portal on a freshly deployed project (t3), through nginx.
 
 Walks every page and feature in the order a new user would. Each step is independent-ish: a failure is
@@ -17,6 +18,9 @@ B = ROOT + "/mgmt"
 SIM = "http://127.0.0.1:8090"
 SIM_IN = "http://host.docker.internal:8090"  # what the portal container uses
 OUT = sys.argv[1]
+import os
+KEY = os.environ.get("MMRAG_KEY")                  # project access key (./setup.sh key t3)
+H = {"X-API-Key": KEY} if KEY else {}
 results, console = [], []
 T = 120_000  # ms, for anything waiting on LightRAG
 
@@ -66,7 +70,8 @@ def flash_contains(text):
 
 with sync_playwright() as p:
     br = p.chromium.launch(channel="chrome", headless=True)
-    ctx = br.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    ctx = br.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True,
+                         http_credentials={"username": "t3", "password": KEY} if KEY else None)
     pg = ctx.new_page()
     pg.on("dialog", lambda d: d.accept())
     pg.on("pageerror", lambda e: console.append(("pageerror", pg.url, str(e))))
@@ -118,7 +123,7 @@ with sync_playwright() as p:
         assert hrefs[0].endswith("/mmrag/t3/mgmt/settings"), hrefs
         for h in hrefs[1:]:  # public URLs use mydomain.com -> check through the local nginx
             local = h.replace("http://mydomain.com", "http://127.0.0.1:18088")
-            assert httpx.get(local).status_code == 200, local
+            assert httpx.get(local, auth=("t3", KEY) if KEY else None).status_code == 200, local
         pg.keyboard.press("Escape")
         expect(menu).to_be_hidden()
 
@@ -398,7 +403,7 @@ with sync_playwright() as p:
         expect(pg.locator("#doc-content")).to_contain_text("The retry limit is")
         expect(pg.locator("#doc-content table")).to_be_visible()
         state["doc_url"] = pg.url
-        raw = httpx.get(pg.url + "/raw")
+        raw = httpx.get(pg.url + "/raw", auth=("t3", KEY) if KEY else None)
         assert raw.status_code == 200 and raw.text.startswith("# Simulated Home")
         with pg.expect_download() as dl:
             pg.click("a:has-text('Download')")
@@ -637,7 +642,7 @@ with sync_playwright() as p:
     def _():
         # LightRAG refuses while busy -> wait until idle
         for _ in range(60):
-            if httpx.get(ROOT + "/api/documents/pipeline_status").json().get("busy") is False:
+            if httpx.get(ROOT + "/api/documents/pipeline_status", headers=H).json().get("busy") is False:
                 break
             time.sleep(2)
         pg.goto(B + "/settings")
@@ -652,11 +657,41 @@ with sync_playwright() as p:
         flash_contains("All data cleared")
         expect(pg.locator(".tabs .cnt").nth(2)).to_have_text("0")
         for _ in range(30):
-            c = httpx.get(ROOT + "/api/documents/status_counts").json()["status_counts"]
+            c = httpx.get(ROOT + "/api/documents/status_counts", headers=H).json()["status_counts"]
             if sum(v for k, v in c.items() if k != "all") == 0:
                 break
             time.sleep(2)
         assert sum(v for k, v in c.items() if k != "all") == 0, c
+
+    # ======================= 16b. access control =======================
+    @step("access: Settings shows the key masked, Show reveals it; LightRAG web UI works after login")
+    def _():
+        pg.goto(B + "/settings#access")
+        k = pg.locator("#key")
+        expect(k).to_have_attribute("type", "password")
+        pg.click("#access button:has-text('Show')")
+        expect(k).to_have_attribute("type", "text")
+        assert k.input_value() == KEY
+        shot("16_settings_access", full=False)
+        # web UI: its own XHR calls must be authorised (nginx adds the key)
+        statuses = []
+        pg.on("response", lambda r: statuses.append((r.status, r.url)) if "/mmrag/t3/api/" in r.url and "/webui/" not in r.url else None)
+        pg.goto(ROOT + "/api/webui/")
+        pg.wait_for_timeout(4000)
+        denied = [x for x in statuses if x[0] in (401, 403)]
+        assert statuses and not denied, (statuses[:5], denied[:5])
+        shot("17_webui", full=False)
+
+    @step("access: a browser without credentials is refused everywhere except downloads")
+    def _():
+        anon = br.new_context()
+        for url in (B + "/", B + "/settings", ROOT + "/api/webui/", ROOT + "/api/docs", ROOT + "/api/documents/paginated"):
+            assert anon.request.get(url).status == 401, url
+        assert anon.request.get(B + "/downloads/samples/jira_ingest.py").status == 200
+        # a forged/stale cookie does not help
+        anon.add_cookies([{"name": "mmrag_t3", "value": "mmr_forged", "url": B + "/"}])
+        assert anon.request.get(B + "/").status == 401
+        anon.close()
 
     # ======================= 17. errors, responsive, console =======================
     @step("unknown pages show the designed error page")
@@ -684,7 +719,7 @@ with sync_playwright() as p:
 
     @step("no unexpected JS errors in the whole session")
     def _():
-        expected = re.compile(r"status of (401|404|409|422)")
+        expected = re.compile(r"status of (401|403|404|409|422)")
         real = [c for c in console if not expected.search(c[2])]
         assert not real, real[:5]
 

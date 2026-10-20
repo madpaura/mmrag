@@ -9,6 +9,17 @@ Ingest from your own scripts, CI jobs or other tools instead of the portal. Ever
 | LightRAG API | `{{API}}` |
 | API reference | <a href="{{API}}/docs" target="_blank" rel="noopener">{{API}}/docs</a> |
 | Python package | `pip install "{{PKG}}"` |
+| Access key | Every API call needs `X-API-Key: <key>` — find it under <a href="{{base}}/settings#access">Settings → Access</a> |
+
+## Authentication
+
+The API only accepts requests that carry this project's access key. Keep it out of code — use an environment variable:
+
+```bash
+export LIGHTRAG_API_KEY='<access key from Settings → Access>'
+```
+
+The package and both samples read `LIGHTRAG_API_KEY` automatically. A request without a valid key gets **401**.
 
 ## 1. Install the package
 
@@ -30,9 +41,10 @@ Both are single files you can run as-is or copy into your own code. Re-running t
 ## 3. The client in five lines
 
 ```python
+import os
 from mmrag_connectors import LightRAGClient
 
-lr = LightRAGClient("{{API}}")
+lr = LightRAGClient("{{API}}", api_key=os.environ["LIGHTRAG_API_KEY"])
 track = lr.upsert_text("# Release notes\n\nVersion 2.1 adds …", "release-notes-2.1.md")  # insert or replace
 print(lr.wait([track]))          # waits until LightRAG has processed it
 print(lr.query("What does version 2.1 add?", mode="mix"))
@@ -51,17 +63,17 @@ print(lr.query("What does version 2.1 add?", mode="mix"))
 
 ```bash
 # insert a text document
-curl -X POST {{API}}/documents/text -H "Content-Type: application/json" \
+curl -X POST {{API}}/documents/text -H "X-API-Key: $LIGHTRAG_API_KEY" -H "Content-Type: application/json" \
   -d '{"text": "# Title\n\nBody…", "file_source": "my-doc.md"}'          # -> {"track_id": "…"}
 
 # upload a file
-curl -X POST {{API}}/documents/upload -F "file=@handbook.pdf"
+curl -X POST {{API}}/documents/upload -H "X-API-Key: $LIGHTRAG_API_KEY" -F "file=@handbook.pdf"
 
 # processing status
-curl {{API}}/documents/track_status/<track_id>
+curl -H "X-API-Key: $LIGHTRAG_API_KEY" {{API}}/documents/track_status/<track_id>
 
 # ask
-curl -X POST {{API}}/query -H "Content-Type: application/json" -d '{"query": "…", "mode": "mix"}'
+curl -X POST {{API}}/query -H "X-API-Key: $LIGHTRAG_API_KEY" -H "Content-Type: application/json" -d '{"query": "…", "mode": "mix"}'
 ```
 
 ## Rules LightRAG enforces

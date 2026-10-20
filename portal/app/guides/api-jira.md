@@ -7,6 +7,7 @@ Fetches Jira (Data Center) issues through the REST API, turns each into a markdo
 ```bash
 pip install "{{PKG}}"
 curl -O "{{SAMPLE_URL}}"
+export LIGHTRAG_API_KEY='<access key>'          # Settings → Access in this portal
 export JIRA_TOKEN=<personal access token>   # Jira → profile → Personal Access Tokens
 ```
 

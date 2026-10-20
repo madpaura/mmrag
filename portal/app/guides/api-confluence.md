@@ -7,6 +7,7 @@ Fetches Confluence (Data Center) pages through the REST API, converts them to ma
 ```bash
 pip install "{{PKG}}"
 curl -O "{{SAMPLE_URL}}"
+export LIGHTRAG_API_KEY='<access key>'          # Settings → Access in this portal
 export CONFLUENCE_TOKEN=<personal access token>   # Confluence → profile → Settings → Personal Access Tokens
 ```
 

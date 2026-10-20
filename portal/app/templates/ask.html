@@ -47,6 +47,7 @@
 <details>
 <summary style="padding:10px 16px;border-top:1px solid var(--bd);cursor:pointer;font-size:12px;font-weight:600">Use this query from code</summary>
 <pre class="code">curl -X POST {{ api_url }}/query \
+  -H "X-API-Key: $LIGHTRAG_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{{ {"query": q, "mode": mode}|tojson }}'</pre>
 </details>

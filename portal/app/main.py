@@ -528,7 +528,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def settings_page(request: Request):
         rows = db.all("select s.id, s.name, count(d.id) n from sources s left join documents d on d.source_id=s.id "
                       "group by s.id order by s.type='files', s.id")
-        return page(request, "settings.html", tab="settings", src_rows=rows)
+        return page(request, "settings.html", tab="settings", src_rows=rows, api_key=s.lightrag_api_key)
 
     # ---- ask --------------------------------------------------------------
     MODES = [("mix", "Knowledge graph and vector retrieval together. A good default for most questions."),
