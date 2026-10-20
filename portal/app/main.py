@@ -611,6 +611,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(buf.getvalue(), media_type="application/zip",
                         headers={"Content-Disposition": 'attachment; filename="mmrag_connectors.zip"'})
 
+    @r.get("/downloads/ca-bundle.pem")
+    def download_ca_bundle():
+        from fastapi.responses import Response
+        from mmrag_connectors import tls
+        files = [f for f in tls.extra_ca_files() if f.parent == Path(os.environ.get("MMRAG_CA_DIR", "/nonexistent"))]
+        if not files:
+            raise HTTPException(404, "no company CA configured (./setup.sh trust-ca on the server)")
+        pem = "".join(f.read_text("utf-8", errors="ignore").strip() + "\n" for f in files)
+        return Response(pem, media_type="application/x-pem-file",
+                        headers={"Content-Disposition": 'attachment; filename="ca-bundle.pem"'})
+
     @r.get("/downloads/samples/{name}")
     def download_sample(request: Request, name: str):
         from fastapi.responses import Response

@@ -8,6 +8,7 @@ from typing import Iterator
 import httpx
 from urllib.parse import urlparse
 
+from . import tls
 from .base import Connector, ConnectorError, Document, Field_, register
 from .htmlmd import html_to_md
 
@@ -50,10 +51,13 @@ class JiraConnector(Connector):
         self.base = c["base_url"].rstrip("/")
         self.host = re.sub(r"[^\w.-]", "_", urlparse(self.base).netloc + urlparse(self.base).path).strip("_")
         self.http = httpx.Client(headers={"Authorization": f"Bearer {c['token']}"}, timeout=60,
-                                 verify=bool(c["verify_ssl"]), follow_redirects=True)
+                                 verify=tls.verify_for(bool(c["verify_ssl"])), follow_redirects=True)
 
     def _get(self, path: str, **params):
-        r = self.http.get(self.base + path, params=params)
+        try:
+            r = self.http.get(self.base + path, params=params)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:  # TLS / DNS / refused: fail the run, don't skip
+            raise ConnectorError(f"cannot reach Jira: {tls.explain(e, self.base)}")
         if r.status_code in (401, 403):
             raise ConnectorError(f"Jira denied access ({r.status_code}) for {path}")
         r.raise_for_status()
@@ -63,7 +67,7 @@ class JiraConnector(Connector):
         try:
             d = self._get("/rest/api/2/myself")
         except httpx.HTTPError as e:
-            raise ConnectorError(f"cannot reach Jira: {e}")
+            raise ConnectorError(f"cannot reach Jira: {tls.explain(e, self.base)}")
         return f"ok (authenticated as {d.get('displayName') or d.get('name')})"
 
     def _jql(self, since: datetime | None) -> str:

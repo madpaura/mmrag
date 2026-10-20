@@ -10,6 +10,8 @@ from typing import Any, Iterable
 
 import httpx
 
+from . import tls
+
 TERMINAL = {"PROCESSED", "FAILED"}
 
 
@@ -26,7 +28,7 @@ class LightRAGBusy(LightRAGError):
 class LightRAGClient:
     def __init__(self, base_url: str, api_key: str | None = None, timeout: float = 60, verify: bool = True):
         headers = {"X-API-Key": api_key} if api_key else {}
-        self._c = httpx.Client(base_url=base_url.rstrip("/"), headers=headers, timeout=timeout, verify=verify)
+        self._c = httpx.Client(base_url=base_url.rstrip("/"), headers=headers, timeout=timeout, verify=tls.verify_for(verify))
 
     def close(self) -> None:
         self._c.close()
@@ -35,7 +37,7 @@ class LightRAGClient:
         try:
             r = self._c.request(method, path, **kw)
         except httpx.HTTPError as e:
-            raise LightRAGError(f"LightRAG unreachable: {e}") from e
+            raise LightRAGError(f"LightRAG unreachable: {tls.explain(e, str(self._c.base_url))}") from e
         if r.status_code >= 400:
             raise LightRAGError(f"{method} {path} -> {r.status_code}: {r.text[:300]}", r.status_code)
         return r.json() if r.content else {}

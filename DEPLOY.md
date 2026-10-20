@@ -73,7 +73,20 @@ Nightly via cron:
 ./setup.sh destroy p1             # type the name to confirm; deletes data + nginx route
 ```
 
-## 6. Ingest data
+## 6. Company certificates (internal Confluence / Jira)
+
+If **Test connection** fails with `certificate verify failed: unable to get local issuer certificate`, the server uses a company CA. Trust it once for all projects:
+
+```bash
+./setup.sh trust-ca https://confluence.company.com     # reads the chain (+ missing root via AIA), asks to confirm
+./setup.sh trust-ca company-root.crt                   # or the CA file from IT (PEM / DER / .p7b)
+./setup.sh trust-ca --list                             # what is trusted (config/ca/)
+```
+
+Check the shown sha256 fingerprints with IT before confirming. Scripts on laptops use the same CAs:
+`curl -O <BASE_URL>/mmrag/p1/mgmt/downloads/ca-bundle.pem && export MMRAG_CA_BUNDLE=$PWD/ca-bundle.pem`
+
+## 7. Ingest data
 
 * **Portal:** Sources → New source (Confluence / Jira), or Upload documents.
 * **Scripts:** Portal → Guides → Developers:
@@ -83,11 +96,12 @@ Nightly via cron:
   python jira_ingest.py --base-url https://jira.example.com --project ABC
   ```
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
 | Browser spins, no login prompt | You can't reach the server or port (VPN/LAN/firewall). Test: `curl -I <BASE_URL>/mmrag/p1/mgmt/` |
+| `certificate verify failed` | `./setup.sh trust-ca https://<server>` (section 6) |
 | 401 everywhere | Wrong key / project name; `./setup.sh key p1` |
 | 404 on the URL | nginx doesn't include `/etc/nginx/mmrag.d/*.conf`, or it wasn't reloaded |
 | Documents fail in a run | Open the run page: errors are grouped. Usually LiteLLM or embeddings are down (`curl localhost:4000/health/liveliness`) |

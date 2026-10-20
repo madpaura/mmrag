@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlparse, parse_qs
 
 import httpx
 
+from . import tls
 from .base import Connector, ConnectorError, Document, Field_, register
 from .htmlmd import html_to_md
 
@@ -49,10 +50,13 @@ class ConfluenceConnector(Connector):
         c = self.config
         self.base = c["base_url"].rstrip("/")
         self.http = httpx.Client(headers={"Authorization": f"Bearer {c['token']}"}, timeout=60,
-                                 verify=bool(c["verify_ssl"]), follow_redirects=True)
+                                 verify=tls.verify_for(bool(c["verify_ssl"])), follow_redirects=True)
 
     def _get(self, path: str, **params):
-        r = self.http.get(self.base + path, params=params)
+        try:
+            r = self.http.get(self.base + path, params=params)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:  # TLS / DNS / refused: fail the run, don't skip
+            raise ConnectorError(f"cannot reach Confluence: {tls.explain(e, self.base)}")
         if r.status_code in (401, 403):
             raise ConnectorError(f"Confluence denied access ({r.status_code}) for {path}")
         r.raise_for_status()
@@ -62,7 +66,7 @@ class ConfluenceConnector(Connector):
         try:
             d = self._get("/rest/api/space", limit=1)
         except httpx.HTTPError as e:
-            raise ConnectorError(f"cannot reach Confluence: {e}")
+            raise ConnectorError(f"cannot reach Confluence: {tls.explain(e, self.base)}")
         return f"ok ({d.get('size', 0)} space visible)"
 
     def _page(self, pid: str) -> dict:

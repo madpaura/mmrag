@@ -76,6 +76,17 @@ curl -H "X-API-Key: $LIGHTRAG_API_KEY" {{API}}/documents/track_status/<track_id>
 curl -X POST {{API}}/query -H "X-API-Key: $LIGHTRAG_API_KEY" -H "Content-Type: application/json" -d '{"query": "…", "mode": "mix"}'
 ```
 
+## Company certificates (TLS)
+
+If your Confluence / Jira uses a company CA, scripts fail with `certificate verify failed: unable to get local issuer certificate`. Use the CA bundle this server already trusts:
+
+```bash
+curl -O {{PORTAL}}/downloads/ca-bundle.pem
+export MMRAG_CA_BUNDLE=$PWD/ca-bundle.pem      # the package and samples pick it up
+```
+
+(Admins add CAs on the server with `./setup.sh trust-ca https://confluence.example.com`.)
+
 ## Rules LightRAG enforces
 
 | Rule | What to do |

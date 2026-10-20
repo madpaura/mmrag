@@ -17,3 +17,5 @@ node_modules/
 # secrets: keys live only in these files
 *.env.local
 data-src/config/.env
+config/ca/*
+!config/ca/README.md

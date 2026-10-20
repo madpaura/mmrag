@@ -11,6 +11,8 @@
 #   ./setup.sh destroy <proj>           stop and DELETE all data of a project
 #   ./setup.sh key        <proj>        show the project's access key (API key = portal password)
 #   ./setup.sh rotate-key <proj>        replace the key everywhere (LightRAG, portal, nginx)
+#   ./setup.sh trust-ca <url|cert-file>... [-y]   trust a company CA (fixes "certificate verify failed")
+#   ./setup.sh trust-ca --list                    show trusted company CAs
 #
 # Global settings (env or config/global.env):
 #   BASE_URL (http://mydomain.com)  URL_ROOT (/mmrag)  NGINX_CONF_DIR (/etc/nginx/mmrag.d)
@@ -25,7 +27,7 @@ NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx/mmrag.d}"
 NGINX_RELOAD="${NGINX_RELOAD:-1}"
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
 PORT_BASE="${PORT_BASE:-19600}"
-PROJECTS="$ROOT/projects"; BACKUPS="$ROOT/backups"
+PROJECTS="$ROOT/projects"; BACKUPS="$ROOT/backups"; CA_DIR="$ROOT/config/ca"
 VOLUMES=(postgres_data neo4j_data rag_inputs rag_storage portal_data)
 
 c_red=$'\e[31m'; c_grn=$'\e[32m'; c_yel=$'\e[33m'; c_off=$'\e[0m'
@@ -51,7 +53,7 @@ check() {
   command -v docker >/dev/null && ok "docker $(docker --version | awk '{print $3}' | tr -d ,)" || { warn "docker missing"; bad=1; }
   docker info >/dev/null 2>&1 && ok "docker daemon reachable" || { warn "cannot talk to docker daemon (permissions?)"; bad=1; }
   docker compose version >/dev/null 2>&1 && ok "docker compose v2" || { warn "docker compose v2 missing"; bad=1; }
-  for t in curl tar sha256sum openssl; do command -v $t >/dev/null && ok "$t" || { warn "$t missing"; bad=1; }; done
+  for t in curl tar sha256sum openssl awk; do command -v $t >/dev/null && ok "$t" || { warn "$t missing"; bad=1; }; done
   [[ -f "$ROOT/patches/pipeline.py" ]] && ok "LightRAG patch present" || { warn "patches/pipeline.py missing"; bad=1; }
   if [[ ! -f "$ROOT/stack/lightrag.env.tmpl" && -f "$ROOT/stack/lightrag.env.tmpl.example" ]]; then
     cp "$ROOT/stack/lightrag.env.tmpl.example" "$ROOT/stack/lightrag.env.tmpl"
@@ -166,6 +168,7 @@ deploy() {
   mkdir -p "$d"
   [[ -f "$d/.env" ]] || init_project "$p"
   ensure_key "$p"
+  mkdir -p "$CA_DIR"                   # company CAs, mounted read-only into the portal (see trust-ca)
   cp "$ROOT/stack/docker-compose.yml" "$d/docker-compose.yml"
   dc "$p" config -q || die "compose config invalid"
   dc "$p" up -d --build --remove-orphans
@@ -272,6 +275,108 @@ destroy() {
   rm -rf "$(pdir "$p")"; ok "destroyed $p"
 }
 
+# ---------------------------------------------------------------- company CA trust
+# Internal servers often use certificates from a company CA that the portal (public CAs only) doesn't know:
+#   "SSL: CERTIFICATE_VERIFY_FAILED ... unable to get local issuer certificate".
+# trust-ca collects the CA certificates (from the server's chain, its AIA "CA Issuers" links, or files from IT),
+# shows them for confirmation, stores them in config/ca/ and restarts the portals, which trust them on top of the
+# public CAs.
+
+ca_info() {  # pretty one-liner for a PEM cert
+  printf '  subject : %s\n  issuer  : %s\n  expires : %s\n  sha256  : %s\n' \
+    "$(openssl x509 -in "$1" -noout -subject -nameopt oneline 2>/dev/null | sed 's/^subject= *//')" \
+    "$(openssl x509 -in "$1" -noout -issuer -nameopt oneline 2>/dev/null | sed 's/^issuer= *//')" \
+    "$(openssl x509 -in "$1" -noout -enddate 2>/dev/null | cut -d= -f2)" \
+    "$(openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
+}
+
+split_pem() {  # split_pem <file-with-many-certs> <out-prefix>  -> out-prefix-1.pem, -2.pem ...
+  awk -v pre="$2" '/-----BEGIN CERTIFICATE-----/{n++; p=1} p{print > (pre "-" n ".pem")} /-----END CERTIFICATE-----/{p=0}' "$1"
+}
+
+to_pem() {  # any of PEM / DER / PKCS#7 -> PEM certificates on stdout
+  if grep -q "BEGIN CERTIFICATE" "$1" 2>/dev/null; then cat "$1"
+  elif openssl x509 -inform DER -in "$1" 2>/dev/null; then :
+  elif openssl pkcs7 -inform DER -in "$1" -print_certs 2>/dev/null | grep -q BEGIN; then openssl pkcs7 -inform DER -in "$1" -print_certs
+  elif openssl pkcs7 -in "$1" -print_certs 2>/dev/null | grep -q BEGIN; then openssl pkcs7 -in "$1" -print_certs
+  else return 1; fi
+}
+
+aia_parent() {  # download the issuer of a cert via its AIA "CA Issuers" URL (best effort) -> PEM path or ""
+  local cert="$1" out="$2" url
+  [[ "$(openssl x509 -in "$cert" -noout -subject -nameopt oneline)" == "subject=$(openssl x509 -in "$cert" -noout -issuer -nameopt oneline | sed 's/^issuer=//')" ]] && return 1  # self-signed root
+  url=$(openssl x509 -in "$cert" -noout -text 2>/dev/null | grep -o 'CA Issuers - URI:[^ ,]*' | head -1 | sed 's/CA Issuers - URI://')
+  [[ -n "$url" ]] || return 1
+  curl -fsS -m 15 "$url" -o "$out.raw" 2>/dev/null || return 1
+  to_pem "$out.raw" > "$out" 2>/dev/null && grep -q BEGIN "$out"
+}
+
+trust_ca() {
+  mkdir -p "$CA_DIR"
+  if [[ "${1:-}" == "--list" ]]; then
+    local f n=0; for f in "$CA_DIR"/*.crt; do [[ -f "$f" ]] || continue; n=$((n+1)); echo "$(basename "$f")"; ca_info "$f"; done
+    (( n )) || echo "no company CAs trusted yet (config/ca/ is empty)"; return 0
+  fi
+  local yes=0 a; local -a args=()
+  for a in "$@"; do [[ "$a" == "-y" ]] && yes=1 || args+=("$a"); done
+  (( ${#args[@]} )) || die "usage: ./setup.sh trust-ca <https://host[:port] | host[:port] | ca-cert-file>... [-y]"
+  local tmp; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
+  local -a cands=() urls=()
+  local i=0
+  for a in "${args[@]}"; do
+    i=$((i+1))
+    if [[ -f "$a" ]]; then
+      to_pem "$a" > "$tmp/in$i.pem" || die "$a: not a certificate (PEM, DER or PKCS#7 expected)"
+      split_pem "$tmp/in$i.pem" "$tmp/f$i"; cands+=("$tmp"/f$i-*.pem)
+      ok "read $(ls "$tmp"/f$i-*.pem | wc -l) certificate(s) from $a"
+      continue
+    fi
+    local hp host port
+    hp="${a#*://}"; hp="${hp%%/*}"; host="${hp%%:*}"; port="443"; [[ "$hp" == *:* ]] && port="${hp##*:}"
+    urls+=("https://$host:$port/")
+    openssl s_client -connect "$host:$port" -servername "$host" -showcerts </dev/null >"$tmp/s$i.txt" 2>/dev/null || true
+    split_pem "$tmp/s$i.txt" "$tmp/s$i"
+    local -a chain=( $(ls "$tmp"/s$i-*.pem 2>/dev/null | sort -t- -k2 -n) )
+    (( ${#chain[@]} )) || die "could not read certificates from $host:$port (reachable from this host? try a .crt file from IT)"
+    ok "$host:$port presents ${#chain[@]} certificate(s)"
+    local top
+    if (( ${#chain[@]} > 1 )); then cands+=("${chain[@]:1}"); top="${chain[-1]}"   # CAs only, skip the server's own cert
+    else cands+=("${chain[0]}"); top="${chain[0]}"; warn "$host sends only its own certificate; trusting it directly (prefer the CA file from IT)"; fi
+    local lvl; for lvl in 1 2 3; do                      # complete the chain upwards via AIA
+      aia_parent "$top" "$tmp/aia$i-$lvl.pem" || break
+      ok "fetched issuer via AIA: $(openssl x509 -in "$tmp/aia$i-$lvl.pem" -noout -subject -nameopt oneline | sed 's/^subject= *//')"
+      cands+=("$tmp/aia$i-$lvl.pem"); top="$tmp/aia$i-$lvl.pem"
+    done
+  done
+  echo; echo "Certificates to trust:"; local c; for c in "${cands[@]}"; do ca_info "$c"; echo; done
+  if (( ! yes )); then
+    echo "Verify the sha256 fingerprints with your IT/security team (or their published CA page)."
+    read -r -p "Trust these for all projects? [y/N] " ans; [[ "$ans" =~ ^[yY] ]] || die "aborted"
+  fi
+  local fp cn dest n=0
+  for c in "${cands[@]}"; do
+    fp=$(openssl x509 -in "$c" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d : | cut -c1-12)
+    cn=$(openssl x509 -in "$c" -noout -subject -nameopt multiline | sed -n 's/^ *commonName *= *//p' | head -1 | tr -c 'A-Za-z0-9._-' '_' | cut -c1-40)
+    dest="$CA_DIR/${cn:-ca}-$fp.crt"
+    [[ -f "$dest" ]] && continue
+    openssl x509 -in "$c" -out "$dest" && chmod 644 "$dest" && n=$((n+1))
+  done
+  ok "$n new CA certificate(s) in config/ca/"
+  local d p; for d in "$PROJECTS"/*/; do
+    p=$(basename "$d"); [[ -f "$d/.env" ]] || continue
+    cp "$ROOT/stack/docker-compose.yml" "$d/docker-compose.yml"
+    dc "$p" ps -q portal 2>/dev/null | grep -q . && dc "$p" up -d portal >/dev/null 2>&1 && ok "portal of $p restarted with the new trust"
+  done
+  local u ctr; ctr=$(docker ps --format '{{.Names}}' | grep -m1 -E '^mmrag-.*-portal-1$' || true)
+  [[ -n "$ctr" ]] || { warn "no running portal to test from"; return 0; }
+  sleep 3
+  for u in "${urls[@]}"; do
+    if docker exec "$ctr" python -c "import sys,httpx; from mmrag_connectors import tls; httpx.get(sys.argv[1], verify=tls.verify_for(True), timeout=15)" "$u" >/dev/null 2>"$tmp/err"; then
+      ok "TLS to $u verified from inside $ctr"
+    else warn "still failing from $ctr: $(tail -1 "$tmp/err")"; fi
+  done
+}
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   check)   check && ok "ready" ;;
@@ -284,5 +389,6 @@ case "$cmd" in
   destroy) destroy "${1:-}" ;;
   key)     show_key "${1:-}" ;;
   rotate-key) rotate_key "${1:-}" ;;
-  *) sed -n '2,17p' "$0" ;;
+  trust-ca) trust_ca "$@" ;;
+  *) sed -n '2,19p' "$0" ;;
 esac
