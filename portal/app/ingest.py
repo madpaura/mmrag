@@ -168,8 +168,10 @@ class Runner:
         since = None
         if self.db.one("select trigger from runs where id=?", rid)["trigger"] == "schedule" and src["last_success_at"]:
             since = datetime.strptime(src["last_success_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        for doc in conn.fetch(since):
-            yield Item(doc.external_id, doc.title, doc.url, doc.file_source, doc.content_hash, len(doc.content), text=doc.content)
+        with conn:
+            for doc in conn.fetch(since):
+                yield Item(doc.external_id, doc.title, doc.url, doc.file_source, doc.content_hash, len(doc.content),
+                           text=doc.content)
 
     def _replace(self, rid, src, lr, changed) -> None:
         db = self.db

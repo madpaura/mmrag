@@ -195,7 +195,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for f in cls.config_schema:
                     if f.type == "password" and not cfg[f.name]:
                         cfg[f.name] = old["config"].get(f.name, "")
-            msg, ok = cls(cfg).test(), True
+            with cls(cfg) as conn:
+                msg, ok = conn.test(), True
         except Exception as e:  # noqa: BLE001
             msg, ok = str(e), False
         return tpl.TemplateResponse(request, "_test_result.html", {"ok": ok, "msg": msg})

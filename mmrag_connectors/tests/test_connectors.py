@@ -96,3 +96,32 @@ def test_upsert_replaces_existing_even_while_busy(lightrag_url):
     t = c.upsert_text("v2", "doc.md", interval=0.1, timeout=20)
     c.wait([t], interval=0.1, timeout=10)
     assert [d["text"] for d in mock_lightrag.DOCS.values()] == ["v2"]
+
+
+def test_rendering_helpers_need_no_server():
+    from mmrag_connectors.confluence import jira_refs, page_id_from
+    from mmrag_connectors.jira import issue_markdown, linked_keys
+    assert page_id_from("https://c.example.com/spaces/X/pages/42/Title") == "42"
+    assert page_id_from("https://c.example.com/pages/viewpage.action?pageId=7") == "7"
+    assert list(jira_refs('<a href="https://jira.example.com/browse/ABC-12">x</a>')) == [("jira.example.com", "ABC-12")]
+    issue = {"key": "ABC-1", "fields": {"summary": "S", "issuelinks": [
+        {"type": {"outward": "blocks"}, "outwardIssue": {"key": "ABC-2", "fields": {"summary": "T"}}}]}}
+    assert linked_keys(issue) == ["ABC-2"]
+    md = issue_markdown(issue)
+    assert md.startswith("# ABC-1: S") and "- blocks ABC-2: T" in md
+
+
+def test_jira_fetch_keys_in_chunks(atlassian, monkeypatch):
+    from mmrag_connectors import jira
+    monkeypatch.setattr(jira, "KEY_CHUNK", 2)
+    with get("jira")({"base_url": atlassian + "/jira", "token": "sim-token", "mode": "keys", "max_rps": 50}) as j:
+        keys = sorted(d.title.split(":")[0] for d in j.fetch_keys(["SIM-3", "SIM-1", "SIM-2", "SIM-1"]))
+    assert keys == ["SIM-1", "SIM-2", "SIM-3"]
+    assert j.http.http.is_closed
+
+
+def test_linked_jira_follows_confluence_connection_settings(atlassian):
+    c = get("confluence")({"base_url": atlassian + "/confluence", "token": "t", "roots": "1", "verify_ssl": False,
+                           "max_rps": 5, "jira_instances": "https://jira.example.com|tok"})
+    j = c._jira_instances()["jira.example.com"]
+    assert j.config["verify_ssl"] is False and j.config["max_rps"] == 5

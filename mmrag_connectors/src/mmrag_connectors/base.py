@@ -84,6 +84,15 @@ class Connector:
         """Yield documents. ``since`` is a hint for incremental sync; callers still de-duplicate by hash."""
         raise NotImplementedError
 
+    def close(self) -> None:
+        """Release connections. Also called on leaving a ``with`` block."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
     @classmethod
     def guide_text(cls) -> str:
         if not cls.guide:

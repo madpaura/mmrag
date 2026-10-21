@@ -35,8 +35,8 @@ lr.wait(tracks)           # polls /documents/track_status until PROCESSED / FAIL
 ### Connector options
 | Connector | Key options |
 | --- | --- |
-| `confluence` | `base_url`, `token`, `roots` (page URLs/ids, one per line), `space`, `depth`, `follow_jira` + `jira_instances` (`url|token` lines), `verify_ssl` |
-| `jira` | `base_url`, `token`, `mode` = `project`/`jql`/`keys`, `project`, `jql`, `keys`, `include_comments`, `link_depth`, `max_issues`, `verify_ssl` |
+| `confluence` | `base_url`, `token`, `roots` (page URLs/ids, one per line), `space`, `depth`, `follow_jira` + `jira_instances` (`url|token` lines), `max_rps`, `verify_ssl` |
+| `jira` | `base_url`, `token`, `mode` = `project`/`jql`/`keys`, `project`, `jql`, `keys`, `include_comments`, `link_depth`, `max_issues`, `max_rps`, `verify_ssl` |
 
 `fetch(since=datetime)` is an incremental hint (Jira adds `updated >= since`). Callers should still de-duplicate by `Document.content_hash`, as the portal does.
 
@@ -75,6 +75,17 @@ edm = "my_pkg.edm:EdmConnector"
 ```
 
 To ship it inside the portal image, `pip install` it in `portal/Dockerfile`.
+
+### Package layout
+
+| Module | Role |
+| --- | --- |
+| `base.py` | The contract: `Connector`, `Document`, `Field_`, `register`, plugin discovery |
+| `atlassian.py` | `AtlassianConnector`: shared base for Data Center REST products (connection fields, bearer client, rate limiting, error handling) |
+| `confluence.py`, `jira.py` | Each is laid out as: pure rendering functions, then API access, then selection (what to ingest), then `fetch` |
+| `ratelimit.py`, `tls.py`, `htmlmd.py` | Request pacing and 429 handling, company CA trust, HTML to markdown |
+
+A connector for another REST source with a bearer token can subclass `AtlassianConnector` the same way: it gets `get_json()`, `test()` and `close()`, and implements `check()` and `fetch()`. Connectors are context managers (`with get("jira")(cfg) as j: ...`) and release their connections on exit.
 
 ## Tests
 `pytest mmrag_connectors/tests` runs against the simulators in `../simulators` (no network needed).

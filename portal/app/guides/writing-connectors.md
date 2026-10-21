@@ -35,6 +35,27 @@ class EdmConnector(Connector):
 | `external_id` must be stable | it is how a changed document replaces its previous version |
 | Honour `since` when the source can filter by date | scheduled runs pass the last successful run time |
 | Name fields `base_url`, `token`, `verify_ssl` | they appear in the *Connection* step of the form; the rest in *What to ingest* |
+| Release connections in `close()` | the portal closes each connector when a run or connection test ends |
+
+### Sources with a REST API and a bearer token
+
+Subclass `AtlassianConnector` (the base for the built-in Confluence and Jira connectors) instead of `Connector`. It adds the connection fields, request pacing with 429 handling, and clear errors for bad tokens or unreachable servers:
+
+```python
+from mmrag_connectors.atlassian import AtlassianConnector
+
+@register
+class EdmConnector(AtlassianConnector):
+    type, label, product = "edm", "EDM", "EDM"
+    config_schema = AtlassianConnector.schema([Field_("folder", "Folder")])
+
+    def check(self) -> str:                      # shown as "ok (...)" by Test connection
+        return self.get_json("/api/whoami")["name"]
+
+    def fetch(self, since=None):
+        for item in self.get_json("/api/items", folder=self.config["folder"])["items"]:
+            yield Document(...)
+```
 
 ## 3. Register it
 
