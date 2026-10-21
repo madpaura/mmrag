@@ -68,7 +68,9 @@
 <input class="mono" id="logq" hx-preserve="true" aria-label="Search log" placeholder="Search log" style="height:28px;padding:0 8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--fg);width:200px">
 <label class="toggle"><input type="checkbox" id="logerr" hx-preserve="true">Errors only</label>
 <button class="btn sm" aria-label="Copy log" data-copy-from="#log">{{ icon('copy') }}</button>
+<a class="btn sm" href="{{ base }}/runs/{{ run.id }}/log.txt" aria-label="Download full log" title="Download full log">{{ icon('download') }}</a>
 </div>
+{% if log_total > log|length %}<div class="mut" style="padding:8px 16px;font-size:12px;border-bottom:1px solid var(--bd)">Showing the last {{ log|length }} of {{ log_total }} lines. <a href="{{ base }}/runs/{{ run.id }}/log.txt">Download the full log</a> to search all of it.</div>{% endif %}
 <div class="log" role="log" id="log">
 {% for l in log %}
 <div class="ln{{ ' err' if l.err }}"><span class="no">{{ l.no }}</span><span class="ts">{{ l.ts|fmt_time }}</span><span>{{ l.msg }}</span></div>

@@ -38,7 +38,7 @@ a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
 .arrow{display:flex;align-items:center;color:var(--mut);flex:none}
 .log{background:var(--log);color:var(--logfg);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:20px;padding:8px 0;overflow-x:auto}
 .ln{display:flex;gap:16px;padding:0 16px;white-space:pre}
-.ln .no{color:var(--logmut);width:24px;text-align:right;flex:none;user-select:none}
+.ln .no{color:var(--logmut);min-width:24px;text-align:right;flex:none;user-select:none}
 .ln .ts{color:var(--logmut);flex:none}
 .ln.err{background:#f8514926;color:#ffb1ab}
 .ann{display:flex;gap:12px;padding:12px 16px;border-top:1px solid var(--bd);align-items:flex-start}

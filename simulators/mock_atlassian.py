@@ -50,6 +50,59 @@ def build():
 PAGES, ISSUES = build()
 app = FastAPI(title="mock-atlassian")
 
+# Data Center-style per-user token bucket. Off by default; tests/devs set RATE = {"capacity": 5, "fill": 2.0}
+RATE: dict = {}
+_bucket = {"tokens": 0.0, "t": 0.0}
+STATS = {"requests": 0, "limited": 0}
+
+
+@app.middleware("http")
+async def rate_limit(request, call_next):
+    import time as _t
+    from fastapi.responses import JSONResponse
+    if request.url.path.startswith("/sim/"):
+        return await call_next(request)
+    STATS["requests"] += 1
+    if RATE:
+        now = _t.monotonic()
+        if not _bucket["t"]:
+            _bucket.update(tokens=float(RATE["capacity"]), t=now)
+        _bucket["tokens"] = min(RATE["capacity"], _bucket["tokens"] + (now - _bucket["t"]) * RATE["fill"])
+        _bucket["t"] = now
+        hdr = {"X-RateLimit-Limit": str(RATE["capacity"]), "X-RateLimit-FillRate": str(RATE["fill"]),
+               "X-RateLimit-Interval-Seconds": "1"}
+        if _bucket["tokens"] < 1:
+            STATS["limited"] += 1
+            wait = max(1, int((1 - _bucket["tokens"]) / RATE["fill"]) + 1)
+            return JSONResponse({"message": "Rate limit exceeded"}, status_code=429,
+                                headers={**hdr, "Retry-After": str(wait), "X-RateLimit-Remaining": "0"})
+        _bucket["tokens"] -= 1
+        resp = await call_next(request)
+        for k, v in {**hdr, "X-RateLimit-Remaining": str(int(_bucket["tokens"]))}.items():
+            resp.headers[k] = v
+        return resp
+    return await call_next(request)
+
+
+@app.post("/sim/ratelimit")
+def set_rate(capacity: int = 0, fill: float = 0.0, start: float | None = None):
+    """start: tokens in the bucket right now (default: full) — start=0 means 'already exhausted by others'."""
+    import time as _t
+    RATE.clear()
+    if capacity:
+        RATE.update(capacity=capacity, fill=fill)
+    if start is None:
+        _bucket.update(tokens=0.0, t=0.0)
+    else:
+        _bucket.update(tokens=float(start), t=_t.monotonic())
+    STATS.update(requests=0, limited=0)
+    return {"rate": RATE}
+
+
+@app.get("/sim/stats")
+def stats():
+    return STATS
+
 
 def auth(authorization: str = Header(default="")):
     if authorization != f"Bearer {TOKEN}":
@@ -65,8 +118,16 @@ def page_html(p, base: str | None = None) -> str:
             f"<h2>Related tickets</h2><ul>{refs}</ul>")
 
 
+def ancestors(p):
+    out, cur = [], p["parent"]
+    while cur:
+        out.insert(0, {"id": str(cur)})
+        cur = PAGES[cur]["parent"]
+    return out
+
+
 def page_json(p, expand="", base=None):
-    out = {"id": p["id"], "type": "page", "title": p["title"], "space": {"key": "SIM"},
+    out = {"id": p["id"], "type": "page", "title": p["title"], "space": {"key": "SIM"}, "ancestors": ancestors(p),
            "version": {"number": p["rev"], "when": iso(p["when"])},
            "_links": {"webui": f"/spaces/SIM/pages/{p['id']}/{p['title'].replace(' ', '+')}"}}
     if "body.view" in expand:
@@ -79,6 +140,25 @@ def spaces(limit: int = 25):
     return {"results": [{"key": "SIM"}], "size": 1}
 
 
+@app.get("/confluence/rest/api/content/search", dependencies=[Depends(auth)])
+def cql_search(cql: str, request: Request, limit: int = 25, start: int = 0, expand: str = ""):
+    """Subset of CQL: ancestor = N, space = "KEY", id = N, type = page, lastmodified >= "yyyy-MM-dd HH:mm"."""
+    if SIM.get("no_cql"):
+        raise HTTPException(400, "CQL disabled in simulator")
+    base = f"{request.url.scheme}://{request.headers.get('host', 'localhost:8090')}"
+    res = list(PAGES.values())
+    if m := re.search(r"ancestor\s*=\s*(\d+)", cql):
+        anc = m.group(1)
+        res = [p for p in res if any(a["id"] == anc for a in ancestors(p))]
+    if m := re.search(r'space\s*=\s*"?(\w+)"?', cql):
+        res = res if m.group(1) == "SIM" else []
+    if m := re.search(r'lastmodified\s*>=\s*"([\d\- :]+)"', cql):
+        t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+        res = [p for p in res if p["when"] >= t]
+    out = [page_json(p, expand, base) for p in res]
+    return {"results": out[start:start + limit], "size": len(out[start:start + limit]), "totalSize": len(out)}
+
+
 @app.get("/confluence/rest/api/content/{pid}", dependencies=[Depends(auth)])
 def get_page(pid: int, request: Request, expand: str = ""):
     if pid not in PAGES:
@@ -87,9 +167,19 @@ def get_page(pid: int, request: Request, expand: str = ""):
 
 
 @app.get("/confluence/rest/api/content/{pid}/child/page", dependencies=[Depends(auth)])
-def children(pid: int, limit: int = 25, start: int = 0):
-    res = [page_json(p) for p in PAGES.values() if p["parent"] == pid]
+def children(pid: int, request: Request, limit: int = 25, start: int = 0, expand: str = ""):
+    base = f"{request.url.scheme}://{request.headers.get('host', 'localhost:8090')}"
+    res = [page_json(p, expand, base) for p in PAGES.values() if p["parent"] == pid]
     return {"results": res[start:start + limit], "size": len(res)}
+
+
+SIM: dict = {}
+
+
+@app.post("/sim/no_cql")
+def no_cql(on: bool = True):
+    SIM["no_cql"] = on
+    return SIM
 
 
 @app.get("/confluence/rest/api/content", dependencies=[Depends(auth)])

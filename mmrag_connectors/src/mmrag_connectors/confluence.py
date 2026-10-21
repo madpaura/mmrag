@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterator
 from urllib.parse import unquote, urlparse, parse_qs
 
 import httpx
 
 from . import tls
+from .ratelimit import RateLimitedClient
 from .base import Connector, ConnectorError, Document, Field_, register
 from .htmlmd import html_to_md
 
+EXPAND = "body.view,version,space,ancestors"
 JIRA_LINK = re.compile(r"https?://[^\s\"'<>]+/browse/([A-Z][A-Z0-9_]+-\d+)")
 
 
@@ -38,10 +40,12 @@ class ConfluenceConnector(Connector):
         Field_("base_url", "Base URL", required=True, help="Include the context path, if any."),
         Field_("token", "Personal access token", "password", required=True),
         Field_("roots", "Root pages", "textarea", help="Each root and its children are ingested."),
-        Field_("space", "Space key", help="Ingest every page of the space, instead of or in addition to roots."),
+        Field_("space", "Space key", help="Ingest every page of the space. Ignored when root pages are set."),
         Field_("depth", "Depth", "number", default=3, help="Levels below each root. 1 = root only."),
         Field_("follow_jira", "Also ingest linked Jira tickets", "bool", default=False, help="Resolves /browse/KEY links found in pages."),
         Field_("jira_instances", "Jira instances", "textarea", help="base_url|token — one per line"),
+        Field_("max_rps", "Max requests per second", "number", default=2,
+               help="Stays under Confluence's rate limit; 429 answers are waited out (Retry-After)."),
         Field_("verify_ssl", "Verify TLS certificates", "bool", default=True, help="Turn off only for self-signed internal servers."),
     ]
 
@@ -49,8 +53,10 @@ class ConfluenceConnector(Connector):
         super().__init__(config, log)
         c = self.config
         self.base = c["base_url"].rstrip("/")
-        self.http = httpx.Client(headers={"Authorization": f"Bearer {c['token']}"}, timeout=60,
-                                 verify=tls.verify_for(bool(c["verify_ssl"])), follow_redirects=True)
+        self.http = RateLimitedClient(headers={"Authorization": f"Bearer {c['token']}"},
+                                      verify=tls.verify_for(bool(c["verify_ssl"])),
+                                      max_rps=float(c.get("max_rps") or 2), log=self.log)
+        self.batch = 25  # pages (with bodies) per request
 
     def _get(self, path: str, **params):
         try:
@@ -59,6 +65,10 @@ class ConfluenceConnector(Connector):
             raise ConnectorError(f"cannot reach Confluence: {tls.explain(e, self.base)}")
         if r.status_code in (401, 403):
             raise ConnectorError(f"Confluence denied access ({r.status_code}) for {path}")
+        if r.status_code in (429, 503):
+            raise ConnectorError(f"Confluence kept rate-limiting ({r.status_code}) after {self.http.max_retries} retries. "
+                                 "Lower 'Max requests per second', or ask the Confluence admin to exempt this account "
+                                 "(Administration > Rate limiting > Exemptions).")
         r.raise_for_status()
         return r.json()
 
@@ -70,25 +80,49 @@ class ConfluenceConnector(Connector):
         return f"ok ({d.get('size', 0)} space visible)"
 
     def _page(self, pid: str) -> dict:
-        return self._get(f"/rest/api/content/{pid}", expand="body.view,version,space")
+        return self._get(f"/rest/api/content/{pid}", expand=EXPAND)
 
-    def _children(self, pid: str) -> list[str]:
-        ids, start = [], 0
+    def _paged(self, path: str, **params) -> Iterator[dict]:
+        start = 0
         while True:
-            d = self._get(f"/rest/api/content/{pid}/child/page", limit=100, start=start)
-            ids += [p["id"] for p in d.get("results", [])]
-            if len(d.get("results", [])) < 100:
-                return ids
-            start += 100
+            d = self._get(path, limit=self.batch, start=start, **params)
+            res = d.get("results", [])
+            yield from res
+            if len(res) < self.batch:
+                return
+            start += len(res)
 
-    def _space_pages(self, key: str) -> list[str]:
-        ids, start = [], 0
-        while True:
-            d = self._get("/rest/api/content", spaceKey=key, type="page", limit=100, start=start)
-            ids += [p["id"] for p in d.get("results", [])]
-            if len(d.get("results", [])) < 100:
-                return ids
-            start += 100
+    def _cql(self, cql: str) -> Iterator[dict]:
+        self.log(f"CQL: {cql}")
+        yield from self._paged("/rest/api/content/search", cql=cql, expand=EXPAND)
+
+    @staticmethod
+    def _since_clause(since: datetime | None) -> str:
+        if not since:
+            return ""
+        # CQL dates are in the server's time zone; a day of margin is cheap (unchanged pages are skipped by hash)
+        return f' and lastmodified >= "{(since - timedelta(days=1)).strftime("%Y-%m-%d %H:%M")}"'
+
+    def _descendants(self, root: dict, depth: int, since: datetime | None) -> Iterator[dict]:
+        """All pages below `root` down to `depth` levels, bodies included, in as few requests as possible."""
+        if depth <= 1:
+            return
+        base_level = len(root.get("ancestors", []))
+        try:
+            for p in self._cql(f"ancestor = {root['id']} and type = page{self._since_clause(since)}"):
+                if len(p.get("ancestors", [])) - base_level <= depth - 1:
+                    yield p
+            return
+        except httpx.HTTPStatusError as e:  # CQL search unavailable/blocked -> walk children (bodies inline)
+            self.log(f"CQL search failed ({e.response.status_code}); walking child pages instead")
+        level = [root["id"]]
+        for _ in range(depth - 1):
+            nxt = []
+            for pid in level:
+                for p in self._paged(f"/rest/api/content/{pid}/child/page", expand=EXPAND):
+                    nxt.append(p["id"])
+                    yield p
+            level = nxt
 
     def _doc(self, p: dict) -> Document:
         html = p.get("body", {}).get("view", {}).get("value", "")
@@ -115,37 +149,42 @@ class ConfluenceConnector(Connector):
 
     def fetch(self, since: datetime | None = None) -> Iterator[Document]:
         depth = max(1, int(self.config["depth"] or 1))
-        seen: set[str] = set()
-        queue: list[tuple[str, int]] = []
-        for ref in (self.config.get("roots") or "").splitlines():
-            if ref.strip():
-                queue.append((page_id_from(ref), depth))
-        if self.config.get("space"):
-            queue += [(pid, 1) for pid in self._space_pages(self.config["space"].strip())]
-        if not queue:
+        roots = [page_id_from(r) for r in (self.config.get("roots") or "").splitlines() if r.strip()]
+        space = (self.config.get("space") or "").strip()
+        if not roots and not space:
             raise ConnectorError("configure at least one root page or a space key")
+        seen: set[str] = set()
         jira_keys: dict[str, set[str]] = {}
-        while queue:
-            pid, d = queue.pop(0)
-            if pid in seen:
-                continue
-            seen.add(pid)
-            try:
-                page = self._page(pid)
-            except httpx.HTTPError as e:  # e.g. 404: page deleted or moved -> skip it
-                self.log(f"skip page {pid}: {e}")
-                continue
-            # ConnectorError (401/403: bad or expired token) propagates and fails the run
+
+        def emit(page: dict) -> Iterator[Document]:
+            if page["id"] in seen:
+                return
+            seen.add(page["id"])
             doc = self._doc(page)
-            self.log(f"page {pid}: {doc.title}")
+            self.log(f"page {page['id']}: {doc.title}")
             if self.config.get("follow_jira"):
                 for m in re.finditer(JIRA_LINK, page.get("body", {}).get("view", {}).get("value", "")):
-                    host = urlparse(m.group(0)).netloc
-                    jira_keys.setdefault(host, set()).add(m.group(1))
+                    jira_keys.setdefault(urlparse(m.group(0)).netloc, set()).add(m.group(1))
             doc.meta.pop("html", None)
             yield doc
-            if d > 1:
-                queue += [(c, d - 1) for c in self._children(pid)]
+
+        for pid in roots:
+            try:
+                root = self._page(pid)
+            except httpx.HTTPStatusError as e:  # e.g. 404: page deleted or moved -> skip it
+                self.log(f"skip page {pid}: {e}")
+                continue
+            # ConnectorError (401/403, rate limit, TLS) propagates and fails the run
+            yield from emit(root)
+            for p in self._descendants(root, depth, since):
+                yield from emit(p)
+        if space and roots:
+            self.log(f"space '{space}' ignored: root pages are set, so only they (depth {depth}) are ingested")
+        elif space:
+            for p in self._cql(f'space = "{space}" and type = page{self._since_clause(since)}'):
+                yield from emit(p)
+        self.log(f"{len(seen)} page(s) fetched with {self.http.requests} request(s)"
+                 + (f", {self.http.throttled} rate-limited" if self.http.throttled else ""))
         if self.config.get("follow_jira") and jira_keys:
             clients = self._jira_clients()
             for host, keys in jira_keys.items():

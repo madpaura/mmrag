@@ -102,6 +102,7 @@ Check the shown sha256 fingerprints with IT before confirming. Scripts on laptop
 | --- | --- |
 | Browser spins, no login prompt | You can't reach the server or port (VPN/LAN/firewall). Test: `curl -I <BASE_URL>/mmrag/p1/mgmt/` |
 | `certificate verify failed` | `./setup.sh trust-ca https://<server>` (section 6) |
+| Confluence/Jira `429`, "kept rate-limiting" | Edit the source: lower *Max requests per second*. Best: Confluence admin exempts the account (Administration → Rate limiting → Exemptions) |
 | 401 everywhere | Wrong key / project name; `./setup.sh key p1` |
 | 404 on the URL | nginx doesn't include `/etc/nginx/mmrag.d/*.conf`, or it wasn't reloaded |
 | Documents fail in a run | Open the run page: errors are grouped. Usually LiteLLM or embeddings are down (`curl localhost:4000/health/liveliness`) |

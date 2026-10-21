@@ -391,3 +391,17 @@ def test_project_key_enforced_end_to_end(stack, tmp_path):
 def test_settings_warns_when_unprotected(stack):
     stack.app.state.settings.lightrag_api_key = None
     assert "This project is not protected" in stack.get(f"{B}/settings").text
+
+
+def test_run_page_shows_log_tail_and_full_log_downloads(stack):
+    sid = add_confluence(stack, depth="1")
+    rid = run(stack, sid)["id"]
+    db = stack.app.state.db
+    for i in range(1200):
+        db.log(rid, f"filler line {i}")
+    page = stack.get(f"{B}/runs/{rid}/panel").text
+    total = db.one("select count(*) n from run_log where run_id=?", rid)["n"]
+    assert f"Showing the last 500 of {total} lines" in page
+    assert "filler line 1199" in page and "filler line 100<" not in page
+    full = stack.get(f"{B}/runs/{rid}/log.txt")
+    assert full.status_code == 200 and full.text.count("\n") == total and "filler line 100\n" in full.text

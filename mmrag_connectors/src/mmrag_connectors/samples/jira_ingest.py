@@ -41,6 +41,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-wait", action="store_true")
     ap.add_argument("--insecure", action="store_true", help="don't verify TLS certificates")
+    ap.add_argument("--max-rps", type=float, default=2, help="max requests/second to the server (rate limits)")
     a = ap.parse_args()
     if not a.token:
         ap.error("set --token or $JIRA_TOKEN")
@@ -50,7 +51,7 @@ def main() -> int:
     jira = get("jira")({"base_url": a.base_url, "token": a.token, "mode": mode, "project": a.project or "",
                         "jql": a.jql or a.filter, "keys": a.keys or "", "link_depth": a.link_depth,
                         "include_comments": not a.no_comments, "max_issues": a.max_issues,
-                        "verify_ssl": not a.insecure},
+                        "verify_ssl": not a.insecure, "max_rps": a.max_rps},
                        log=lambda m: print("  ·", m))
     try:
         print("Jira:", jira.test())

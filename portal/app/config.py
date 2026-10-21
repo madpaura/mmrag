@@ -20,3 +20,5 @@ class Settings:
         self.max_parallel_runs = int(e("PORTAL_MAX_RUNS", "2"))
         self.conflict_wait = float(e("PORTAL_CONFLICT_WAIT", "900"))  # s to wait for LightRAG to finish deleting an old version
         self.scheduler_tick = float(e("PORTAL_SCHEDULER_TICK", "30"))
+        self.stats_timeout = float(e("PORTAL_STATS_TIMEOUT", "5"))  # s; header status must not stall page loads
+        self.log_tail = int(e("PORTAL_LOG_TAIL", "500"))  # run log lines shown on the run page

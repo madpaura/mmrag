@@ -32,6 +32,14 @@ def test_confluence_space_and_jira_follow(atlassian):
     assert sum(i.startswith("confluence:") for i in ids) == 17
 
 
+def test_confluence_roots_take_precedence_over_space(atlassian):
+    logs = []
+    c = get("confluence")({"base_url": atlassian + "/confluence", "token": "sim-token", "space": "SIM",
+                           "roots": "1000", "depth": 1}, logs.append)
+    assert [d.external_id for d in c.fetch()] == ["confluence:1000"]
+    assert any("space 'SIM' ignored" in m for m in logs)
+
+
 def test_bad_token(atlassian):
     c = get("jira")({"base_url": atlassian + "/jira", "token": "nope"})
     with pytest.raises(ConnectorError):

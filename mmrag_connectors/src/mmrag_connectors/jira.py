@@ -9,6 +9,7 @@ import httpx
 from urllib.parse import urlparse
 
 from . import tls
+from .ratelimit import RateLimitedClient
 from .base import Connector, ConnectorError, Document, Field_, register
 from .htmlmd import html_to_md
 
@@ -41,6 +42,8 @@ class JiraConnector(Connector):
         Field_("jql", "JQL", "textarea", help="In jql mode, the query. In project mode, an extra filter."),
         Field_("link_depth", "Linked-issue depth", "number", default=0, help="0 = only matching issues; N = follow links N hops."),
         Field_("max_issues", "Max issues", "number", default=5000, help="Upper limit per run."),
+        Field_("max_rps", "Max requests per second", "number", default=2,
+               help="Stays under Jira's rate limit; 429 answers are waited out (Retry-After)."),
         Field_("include_comments", "Include comments", "bool", default=True),
         Field_("verify_ssl", "Verify TLS certificates", "bool", default=True, help="Turn off only for self-signed internal servers."),
     ]
@@ -50,8 +53,9 @@ class JiraConnector(Connector):
         c = self.config
         self.base = c["base_url"].rstrip("/")
         self.host = re.sub(r"[^\w.-]", "_", urlparse(self.base).netloc + urlparse(self.base).path).strip("_")
-        self.http = httpx.Client(headers={"Authorization": f"Bearer {c['token']}"}, timeout=60,
-                                 verify=tls.verify_for(bool(c["verify_ssl"])), follow_redirects=True)
+        self.http = RateLimitedClient(headers={"Authorization": f"Bearer {c['token']}"},
+                                      verify=tls.verify_for(bool(c["verify_ssl"])),
+                                      max_rps=float(c.get("max_rps") or 2), log=self.log)
 
     def _get(self, path: str, **params):
         try:
@@ -60,6 +64,9 @@ class JiraConnector(Connector):
             raise ConnectorError(f"cannot reach Jira: {tls.explain(e, self.base)}")
         if r.status_code in (401, 403):
             raise ConnectorError(f"Jira denied access ({r.status_code}) for {path}")
+        if r.status_code in (429, 503):
+            raise ConnectorError(f"Jira kept rate-limiting ({r.status_code}) after {self.http.max_retries} retries. "
+                                 "Lower 'Max requests per second', or ask the Jira admin to exempt this account.")
         r.raise_for_status()
         return r.json()
 

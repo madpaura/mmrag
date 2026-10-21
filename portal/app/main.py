@@ -4,6 +4,7 @@ import html
 import json
 import os
 import shutil
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,10 +12,11 @@ from urllib.parse import quote
 
 import markdown
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from mmrag_connectors import ConnectorError, LightRAGBusy, LightRAGError, available, get
+import httpx
+from mmrag_connectors import ConnectorError, LightRAGBusy, LightRAGClient, LightRAGError, available, get
 
 from . import views as v
 from .config import Settings
@@ -56,10 +58,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     _stats_cache: dict = {"t": 0.0, "v": None}
 
+    _stats_lock = threading.Lock()
+
     def lr_stats(fresh: bool = False) -> dict:
-        if not fresh and _stats_cache["v"] and time.time() - _stats_cache["t"] < 2:
-            return _stats_cache["v"]
-        lr = runner.lr()
+        """LightRAG status for the header pill and overview. A busy LightRAG answers slowly, so pages never wait on
+        it: one caller refreshes (short timeout) while the others get the last known value."""
+        cached = _stats_cache["v"]
+        if cached and not fresh and time.time() - _stats_cache["t"] < 2:
+            return cached
+        if not _stats_lock.acquire(blocking=cached is None):
+            return cached
+        try:
+            st = _fetch_stats(cached)
+        finally:
+            _stats_lock.release()
+        _stats_cache.update(t=time.time(), v=st)
+        return st
+
+    def _fetch_stats(cached: dict | None) -> dict:
+        lr = LightRAGClient(s.lightrag_url, s.lightrag_api_key, timeout=s.stats_timeout)
         try:
             counts = {k.lower(): n for k, n in lr.status_counts().items()}
             pipe = lr.pipeline_status()
@@ -67,11 +84,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                   "active": sum(n for k, n in counts.items() if k in ("pending", "processing", "preprocessed", "analyzing")),
                   "failed": counts.get("failed", 0), "processed": counts.get("processed", 0)}
         except LightRAGError as e:
-            st = {"ok": False, "error": str(e), "counts": {}, "pipeline": {}, "busy": False, "active": 0, "failed": 0,
-                  "processed": 0}
+            if cached and cached["ok"] and isinstance(e.__cause__, httpx.TimeoutException):
+                st = {**cached, "busy": True}  # reachable a moment ago, now too busy to answer quickly
+            else:
+                st = {"ok": False, "error": str(e), "counts": {}, "pipeline": {}, "busy": False, "active": 0,
+                      "failed": 0, "processed": 0}
         finally:
             lr.close()
-        _stats_cache.update(t=time.time(), v=st)
         return st
 
     def nav() -> dict:
@@ -329,13 +348,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         row = db.one("select r.*, s.name sname, s.type stype from runs r join sources s on s.id=r.source_id where r.id=?",
                      rid) or _404()
         run = v.run_view(row)
-        log = db.all("select ts,msg from run_log where run_id=? order by rowid", rid)
-        for i, l in enumerate(log, 1):
+        # a long run logs thousands of lines; the page polls every 2 s, so it carries only the tail
+        log_total = db.one("select count(*) n from run_log where run_id=?", rid)["n"]
+        log = db.all("select ts,msg from run_log where run_id=? order by rowid desc limit ?", rid, s.log_tail)[::-1]
+        for i, l in enumerate(log, log_total - len(log) + 1):
             l["no"], l["err"] = i, l["msg"].startswith(("FAILED", "ERROR", "LightRAG failed", "skip page", "track error"))
-        docs = db.all("select * from documents where run_id=? order by id", rid)
         replaced = row["deleted"] or 0
-        errors = v.group_errors(log)
-        return dict(run=run, log=log, docs=docs, errors=errors, active=run["active"],
+        errors = v.group_errors(db.all("select msg from run_log where run_id=? and (msg like 'LightRAG failed %' "
+                                       "or msg like 'FAILED to submit %') order by rowid", rid))
+        return dict(run=run, log=log, log_total=log_total, errors=errors, active=run["active"],
                     new=max((row["submitted"] or 0) - replaced, 0), replaced=replaced,
                     failed_docs=row["failed"] or 0,
                     finished=(row["processed"] or 0) + (row["failed"] or 0),
@@ -348,6 +369,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @r.get("/runs/{rid}/panel", response_class=HTMLResponse)
     def run_panel(request: Request, rid: int):
         return tpl.TemplateResponse(request, "_run_body.html", run_ctx(rid))
+
+    @r.get("/runs/{rid}/log.txt")
+    def run_log_txt(rid: int):
+        db.one("select 1 x from runs where id=?", rid) or _404()
+        rows = db.all("select ts,msg from run_log where run_id=? order by rowid", rid)
+        return PlainTextResponse("".join(f"{x['ts']}  {x['msg']}\n" for x in rows),
+                                 headers={"Content-Disposition": f'attachment; filename="run-{rid}.log"'})
 
     @r.post("/runs/{rid}/cancel")
     def run_cancel(rid: int):
