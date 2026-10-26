@@ -22,3 +22,6 @@ class Settings:
         self.scheduler_tick = float(e("PORTAL_SCHEDULER_TICK", "30"))
         self.stats_timeout = float(e("PORTAL_STATS_TIMEOUT", "5"))  # s; header status must not stall page loads
         self.log_tail = int(e("PORTAL_LOG_TAIL", "500"))  # run log lines shown on the run page
+        # LightRAG configuration page: the project's .env (shared with setup.sh) and rag-app's control dir
+        self.project_env = e("PORTAL_PROJECT_ENV", "")
+        self.control_dir = e("PORTAL_CONTROL_DIR", "")

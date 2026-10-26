@@ -126,6 +126,7 @@ rotate_key() {
   envset "$d/.env" LIGHTRAG_API_KEY "$(randkey)"
   envset "$d/.env" MMRAG_SESSION "$(randkey)"     # also signs out every browser
   dc "$p" up -d rag-app portal          # both read the key from .env
+  apply_env "$p"
   write_nginx "$p"
   wait_healthy "$p" || warn "services not healthy yet"
   ok "new key for $p — scripts and browsers must use it now:"; show_key "$p"
@@ -172,10 +173,24 @@ deploy() {
   cp "$ROOT/stack/docker-compose.yml" "$d/docker-compose.yml"
   dc "$p" config -q || die "compose config invalid"
   dc "$p" up -d --build --remove-orphans
+  apply_env "$p"
   write_nginx "$p"
   wait_healthy "$p" || warn "not all services healthy yet — check: ./setup.sh status $p"
   echo; ok "project $p:"; echo "   API:  $(envget "$d/.env" LIGHT_RAG_URL)/"; echo "   Mgmt: $(envget "$d/.env" LIGHT_RAG_MGMT_URL)/"
   echo "   Access: user '$p' / the project key  (./setup.sh key $p)"
+}
+
+# rag-app reads .env when it starts (stack/lightrag_run.py), not when compose creates it: restart it if the file
+# changed since. Compares with the hash the running container reports in its status file.
+apply_env() {
+  local p="$1" want have i
+  want=$(sha256sum "$(pdir "$p")/.env" | cut -d' ' -f1)
+  for i in 1 2 3 4 5 6 7 8 9 10; do     # a just-created container writes its status within a second
+    have=$(dc "$p" exec -T rag-app cat /mmrag/control/status.json 2>/dev/null | grep -o '"env_sha256": *"[0-9a-f]*"' | grep -o '[0-9a-f]\{64\}' || true)
+    [[ -n "$have" ]] && break; sleep 1
+  done
+  [[ "$want" == "$have" ]] && return 0
+  dc "$p" restart rag-app >/dev/null && ok "rag-app restarted to load the current .env"
 }
 
 wait_healthy() {

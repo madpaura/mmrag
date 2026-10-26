@@ -9,7 +9,7 @@ http://mydomain.com/mmrag/<proj>/mgmt/   management portal (ingestion, guides)  
 
 ```
 setup.sh                  deploy / down / status / list / backup / restore / destroy / check
-stack/                    templates: docker-compose.yml, lightrag.env.tmpl (your tuned .env), nginx snippet
+stack/                    templates: docker-compose.yml, lightrag.env.tmpl (your tuned .env), nginx snippet; lightrag_run.py (rag-app entrypoint)
 patches/pipeline.py       LightRAG patch (VLM skip) → mounted into the container. Written for **v1.5.2**
 portal/                   FastAPI + HTMX management portal (Dockerfile builds from repo root)
 mmrag_connectors/         reusable package: Confluence/Jira DC connectors + LightRAG client (+ README, sample)
@@ -56,7 +56,7 @@ Only `/health` stays open (LightRAG's default would also expose its Ollama-compa
 ./setup.sh key p1             # show the project's access key
 ./setup.sh rotate-key p1      # new key for LightRAG, portal and nginx
 ```
-Project-specific LightRAG settings: edit `projects/<proj>/.env`, then `./setup.sh deploy <proj>`.
+Project-specific LightRAG settings: the portal's **LightRAG** page (*Save and restart*), or edit `projects/<proj>/.env` and run `./setup.sh deploy <proj>`. Both write the same file; `deploy` restarts LightRAG only if the file changed.
 A backup contains every volume (postgres, neo4j, rag_storage, inputs, portal DB with sources/credentials), plus `.env`, compose, nginx snippet, prompts and the patch. **Treat backups as secrets.**
 
 ## Management portal (`/mmrag/<proj>/mgmt/`)
@@ -65,15 +65,32 @@ A backup contains every volume (postgres, neo4j, rag_storage, inputs, portal DB 
 * **Runs**: live progress (found / unchanged / sent / processed / failed), log, per-document errors, cancel.
 * **Upload documents**: PDF/DOCX/MD/TXT…, parsed by LightRAG's parser. Re-uploading the same name replaces the old version.
 * **Data**: delete a document, all data of a source, or everything (type the project name to confirm).
+* **LightRAG** settings: models, knowledge graph on/off, extraction, parsing/chunking, query defaults and any other
+  LightRAG variable. *Save* writes `projects/<proj>/.env`; *Save and restart* / *Restart LightRAG* restart the rag-app
+  container, and the page shows its progress and whether saved settings are applied yet. Deployment keys (URLs,
+  ports, storage, DB credentials, access key) stay read-only there.
 * **Guides** for each connector, and **Ask** to query the knowledge base.
 * Access: one key per project, see *Access control* above.
 
 ## Development
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e "mmrag_connectors[test]" -r portal/requirements.txt
-.venv/bin/pytest portal/tests mmrag_connectors/tests      # 20 tests, all against simulators
+.venv/bin/pytest portal/tests mmrag_connectors/tests      # all against simulators
 ```
 See `simulators/README.md` to run the portal or a real LightRAG stack without Confluence, Jira or an LLM.
+
+## How the LightRAG page applies settings
+`rag-app` runs `stack/lightrag_run.py` as its entrypoint instead of using compose's `env_file`. It loads `.env` (the
+project directory is mounted read-only) on every start, so a restart applies changes without recreating the
+container; keys from the compose `environment:` block still win. The portal mounts the project directory read-write
+and a shared `lr_control` volume: it writes a restart token there, the entrypoint stops LightRAG and exits, and
+Docker's `restart: unless-stopped` brings the container back. No Docker socket is exposed to the portal.
+
+**Knowledge graph off** (`MMRAG_SKIP_KG=true`): LightRAG itself can only skip extraction per file, through the `!`
+option of a `LIGHTRAG_PARSER` rule (e.g. `*:legacy-R!`), and its `/documents/text` endpoint, which the Confluence and
+Jira connectors use, ignores it. `patches/pipeline.py` adds `MMRAG_SKIP_KG` so the switch covers every document.
+Chunks and vectors are still stored, so `naive` and `mix` queries work (Ask defaults to `naive` then); `local`,
+`global` and `hybrid` find nothing. Existing documents keep their graph until they are re-ingested.
 
 ## Known limits / notes
 * `patches/pipeline.py` only works with **LightRAG v1.5.2** (`:latest`, i.e. 1.5.7, fails at import). Upgrading LightRAG means re-basing the patch, then setting `LIGHTRAG_IMAGE`.

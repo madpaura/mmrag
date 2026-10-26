@@ -49,7 +49,7 @@ Give the key only to that project's team. Other projects reject it.
 ./setup.sh rotate-key p1          # new key everywhere; share it again
 ```
 
-Per-project LightRAG tuning (models, chunk size, …): edit `projects/p1/.env`, then run `./setup.sh deploy p1`.
+Per-project LightRAG tuning (models, knowledge graph on/off, chunk size, …): in the portal under **LightRAG** → *Save and restart*, or edit `projects/p1/.env` and run `./setup.sh deploy p1` (it restarts LightRAG when the file changed). Projects deployed before this page existed need one `./setup.sh deploy p1` to enable it.
 
 ## 4. Backup & restore
 

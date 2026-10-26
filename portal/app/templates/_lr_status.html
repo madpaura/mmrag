@@ -1,0 +1,31 @@
+{%- from "_icons.html" import icon -%}
+{%- set moving = live.state in ('restarting', 'starting') -%}
+<div class="box" id="lrstatus" hx-get="{{ base }}/lightrag/status" hx-trigger="every {{ '2s' if moving else '10s' }}" hx-swap="outerHTML">
+<div class="br first">
+<div style="flex:1 1 320px;display:flex;flex-direction:column;gap:2px">
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><strong>LightRAG container</strong>
+{%- if live.state == 'running' %}<span class="lbl ok" data-state="running">Running</span>
+{%- elif live.state == 'restarting' %}<span class="lbl warn" data-state="restarting">{{ icon('run', 'acc') }}Restarting</span>
+{%- elif live.state == 'starting' %}<span class="lbl warn" data-state="starting">{{ icon('run', 'acc') }}Starting</span>
+{%- elif live.state == 'up' %}<span class="lbl ok" data-state="up">Reachable</span>
+{%- else %}<span class="lbl bad" data-state="{{ live.state }}">{{ 'Stopped' if live.state == 'exited' else 'Unreachable' }}</span>{% endif %}
+{%- if live.up and stats.ok and stats.busy %}<span class="lbl warn">Processing documents</span>{% endif %}
+</div>
+<span class="hint">
+{%- if live.state == 'restarting' %}Stopping LightRAG; Docker starts the container again and it reloads the saved settings.
+{%- elif live.state == 'starting' %}Loading the saved settings and connecting to Postgres and Neo4j. This usually takes 10–60 s.
+{%- elif not live.can_restart %}Restart from here isn't enabled for this project yet: on the server run <span class="mono">./setup.sh deploy {{ project }}</span> once.
+{%- elif live.state == 'exited' %}LightRAG exited (code {{ live.status.returncode }}). Check the settings, then restart; logs: <span class="mono">docker compose logs rag-app</span> in <span class="mono">projects/{{ project }}</span>.
+{%- elif live.started_at %}Started {{ live.started_at }} UTC.{% if live.state != 'running' %} Not answering health checks; if this persists after a restart, the settings may be invalid (see <span class="mono">docker compose logs rag-app</span>).{% endif %}
+{%- endif %}</span>
+</div>
+<form method="post" action="{{ base }}/lightrag/restart" class="inline" data-confirm="{{ 'LightRAG is processing documents. Restarting interrupts the batch; unfinished documents are resumed or marked failed. Restart now?' if stats.ok and stats.busy else 'Restart the LightRAG container now? Queries and ingestion pause for up to a minute.' }}">
+<button class="btn"{% if not live.can_restart or moving %} disabled{% endif %}>{{ icon('retry') }}Restart LightRAG</button>
+</form>
+</div>
+{%- if live.pending and not moving %}
+<div class="br pend" data-pending>
+{{ icon('warn', 'warn') }}<div style="flex:1 1 300px;display:flex;flex-direction:column;gap:2px"><strong>Saved settings are not applied yet</strong><span class="hint">The .env changed after LightRAG started. Restart LightRAG to apply it.</span></div>
+</div>
+{%- endif %}
+</div>

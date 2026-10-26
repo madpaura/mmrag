@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 import httpx
 from mmrag_connectors import ConnectorError, LightRAGBusy, LightRAGClient, LightRAGError, available, get
 
+from . import lrconfig as lrc
 from . import views as v
 from .config import Settings
 from .db import ACTIVE, DB, now
@@ -559,6 +560,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                       "group by s.id order by s.type='files', s.id")
         return page(request, "settings.html", tab="settings", src_rows=rows, api_key=s.lightrag_api_key)
 
+    # ---- LightRAG configuration -----------------------------------------
+    lr_env = lrc.EnvFile(s.project_env) if s.project_env else None
+    lr_ctl = lrc.Control(s.control_dir)
+
+    def lr_values() -> dict:
+        return lr_env.values() if lr_env and lr_env.available() else {}
+
+    def lr_live() -> dict:
+        """What rag-app runs vs. what is saved, plus the progress of a requested restart."""
+        st = lr_ctl.status() if lr_ctl.available() else None
+        lr = LightRAGClient(s.lightrag_url, s.lightrag_api_key, timeout=3)
+        try:
+            lr.health()
+            up = True
+        except LightRAGError:
+            up = False
+        finally:
+            lr.close()
+        req = lr_ctl.requested() if st else ""
+        if st is None:
+            state = "up" if up else "down"
+        elif req and st.get("restart_token") != req:
+            state = "restarting"
+        elif up:
+            state = "running"
+        else:
+            state = "starting" if st.get("state") == "running" else st.get("state", "down")
+        saved = lr_env.sha256() if lr_env and lr_env.available() else None
+        return {"state": state, "up": up, "status": st, "can_restart": st is not None,
+                "pending": bool(st and saved and st.get("env_sha256") != saved),
+                "started_at": v.fmt_sec(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st["started_at"])))
+                if st and st.get("started_at") else None}
+
+    def lr_page(request: Request, form=None, error: str | None = None, status_code: int = 200):
+        env = lr_values()
+        groups = []
+        for gid, title, desc, fields in lrc.GROUPS:
+            rows = []
+            for f in fields:
+                if form is not None and f.type != "secret":
+                    val = ("true" if form.get(f.key) else "false") if f.type == "bool" else form.get(f.key, env.get(f.key, ""))
+                else:
+                    val = env.get(f.key, "")
+                rows.append({"f": f, "value": val, "set": f.key in env, "stored": bool(env.get(f.key))})
+            groups.append({"id": gid, "title": title, "desc": desc, "rows": rows})
+        other = form.get("__other", "") if form is not None else lrc.other_text(env)
+        deploy = [(k, lrc.MASK if lrc.secret(k) and val else val) for k, val in env.items() if lrc.protected(k)]
+        resp = page(request, "lightrag.html", tab="lightrag", groups=groups, other=other, deploy=deploy, error=error,
+                    live=lr_live(), editable=bool(lr_env and lr_env.available()),
+                    env_path=f"projects/{s.project}/.env")
+        resp.status_code = status_code
+        return resp
+
+    def lr_restart() -> None:
+        if not lr_ctl.available() or lr_ctl.status() is None:
+            raise HTTPException(409, f"restart isn't available: redeploy with ./setup.sh deploy {s.project}")
+        lr_ctl.request_restart()
+        _stats_cache.update(t=0.0)
+
+    @r.get("/lightrag", response_class=HTMLResponse)
+    def lightrag_page(request: Request):
+        return lr_page(request)
+
+    @r.post("/lightrag")
+    async def lightrag_save(request: Request):
+        if not (lr_env and lr_env.available()):
+            raise HTTPException(409, f"the project's .env isn't mounted into the portal: redeploy with ./setup.sh deploy {s.project}")
+        form = await request.form()
+        try:
+            changes = lrc.form_changes(lr_values(), form)
+            if changes:
+                lr_env.update(changes)
+        except lrc.ConfigError as e:
+            return lr_page(request, form, str(e), 422)
+        n = len(changes)
+        saved = f"Saved {n} change{'' if n == 1 else 's'}" if n else "No changes"
+        if form.get("action") == "restart":
+            lr_restart()
+            return go("/lightrag", f"{saved}. LightRAG is restarting.")
+        return go("/lightrag", f"{saved}. Restart LightRAG to apply them." if n else saved, "ok" if n else "warn")
+
+    @r.post("/lightrag/restart")
+    def lightrag_restart():
+        lr_restart()
+        return go("/lightrag", "LightRAG is restarting.")
+
+    @r.get("/lightrag/status", response_class=HTMLResponse)
+    def lightrag_status(request: Request):
+        return tpl.TemplateResponse(request, "_lr_status.html", {"live": lr_live(), "stats": lr_stats()})
+
     # ---- ask --------------------------------------------------------------
     MODES = [("mix", "Knowledge graph and vector retrieval together. A good default for most questions."),
              ("hybrid", "Combines local and global graph retrieval."),
@@ -566,14 +657,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
              ("global", "Relationship and theme level. Best for broad, cross-document questions."),
              ("naive", "Plain vector search over chunks, no graph. Fastest; useful as a baseline.")]
 
-    def ask_ctx(q="", mode="mix", answer=None, refs=None, error=None):
-        mode = mode if mode in dict(MODES) else "mix"
+    def ask_ctx(q="", mode="", answer=None, refs=None, error=None):
+        no_kg = lr_values().get("MMRAG_SKIP_KG", "").lower() == "true"
+        mode = mode if mode in dict(MODES) else ("naive" if no_kg else "mix")
         n_src = db.one("select count(distinct source_id) n from documents")["n"]
         return dict(q=q, mode=mode, modes=MODES, mode_desc=dict(MODES)[mode], answer=answer, refs=refs or [],
-                    error=error, n_src=n_src)
+                    error=error, n_src=n_src, no_kg=no_kg)
 
     @r.get("/ask", response_class=HTMLResponse)
-    def ask_page(request: Request, mode: str = "mix"):
+    def ask_page(request: Request, mode: str = ""):
         return page(request, "ask.html", tab="ask", **ask_ctx(mode=mode))
 
     @r.post("/ask", response_class=HTMLResponse)

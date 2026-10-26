@@ -25,6 +25,17 @@ def _serve(app):
     return server, port
 
 
+DEPLOY_BLOCK = """
+# ── mmrag deployment (setup.sh) ──
+PROJECT=t1
+API_PREFIX=/mmrag/t1/api
+LIGHTRAG_PORT=19606
+LIGHTRAG_API_KEY=mmr_secretkey
+MMRAG_SESSION=mmr_sessionsecret
+WHITELIST_PATHS=/health,/mmrag/t1/api/health
+"""
+
+
 @pytest.fixture(scope="session")
 def atlassian():
     import mock_atlassian
@@ -47,8 +58,15 @@ def stack(tmp_path, atlassian):
     s = Settings()
     s.data_dir, s.lightrag_url, s.base_path, s.project = str(tmp_path), f"http://127.0.0.1:{port}", "/mmrag/t1/mgmt", "t1"
     s.poll_interval, s.scheduler_tick = 0.1, 0.2
+    env = tmp_path / "project" / ".env"  # what setup.sh generates: the stack template + deployment block
+    env.parent.mkdir()
+    env.write_text((ROOT / "stack" / "lightrag.env.tmpl.example").read_text().replace("__WEBUI_TITLE__", "'RAG · t1'")
+                   .replace("__GENERATED__", "pw-generated") + DEPLOY_BLOCK)
+    env.chmod(0o600)
+    s.project_env, s.control_dir = str(env), str(tmp_path / "control")
+    (tmp_path / "control").mkdir()
     app = create_app(s)
     with TestClient(app) as c:
-        c.atlassian, c.lightrag = atlassian, mock_lightrag
+        c.atlassian, c.lightrag, c.env, c.ctl = atlassian, mock_lightrag, env, tmp_path / "control"
         yield c
     server.should_exit = True

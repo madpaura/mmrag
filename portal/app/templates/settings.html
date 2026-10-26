@@ -54,6 +54,10 @@ python jira_ingest.py --base-url https://jira.example.com --project ABC   # samp
 <div class="fld"><label for="ep">Endpoint</label>
 <div style="display:flex;max-width:520px"><input id="ep" class="inp mono" readonly="readonly" value="{{ api_url }}" style="flex:1;border-radius:6px 0 0 6px;border-right:0;min-width:0"><button class="btn" style="border-radius:0 6px 6px 0" aria-label="Copy endpoint" data-copy-from="#ep">{{ icon('copy') }}</button></div>
 <span class="hint">Point other tools and agents at this URL. <a href="{{ api_url }}/docs" target="_blank" rel="noopener">Open API docs</a> · <a href="{{ api_url }}/webui/" target="_blank" rel="noopener">Open LightRAG web UI</a></span></div>
+<div class="box" style="max-width:800px"><div class="br first">
+<div style="flex:1 1 300px;display:flex;flex-direction:column;gap:2px"><strong>Server settings</strong><span class="hint">Models, knowledge graph on/off, parsing, chunking and query defaults. Save them and restart LightRAG from the portal.</span></div>
+<a class="btn" href="{{ base }}/lightrag">{{ icon('sliders') }}LightRAG settings</a>
+</div></div>
 </section>
 
 <section id="pipeline" style="display:flex;flex-direction:column;gap:16px">

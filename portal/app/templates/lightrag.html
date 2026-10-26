@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}LightRAG settings{% endblock %}
+{% block css %}{% include "css/settings.css" %}{% include "css/lightrag.css" %}{% endblock %}
+{%- macro field(row) -%}
+{%- set f = row.f -%}{%- set id = 'f_' ~ f.key -%}
+{%- set ph = ('LightRAG default: ' ~ f.default) if f.default else ('Not set' if not row.set else '') -%}
+{%- if f.type == 'bool' -%}
+<div class="fld{{ ' wide' if f.wide }}">
+<input type="hidden" name="{{ f.key }}__present" value="1">
+<label class="chk" for="{{ id }}"><input type="checkbox" id="{{ id }}" name="{{ f.key }}" value="true"{% if (row.value or f.default)|lower in ('true', '1', 'yes', 'on') %} checked{% endif %}{% if not editable %} disabled{% endif %}><span><strong>{{ f.label }}</strong><span class="key">{{ f.key }}</span>{% if f.help %}<br><span class="hint">{{ f.help }}</span>{% endif %}</span></label>
+</div>
+{%- else -%}
+<div class="fld{{ ' wide' if f.wide or f.type in ('json', 'parser') }}"><label for="{{ id }}">{{ f.label }}<span class="key">{{ f.key }}</span></label>
+{%- if f.type == 'select' -%}
+<select id="{{ id }}" name="{{ f.key }}" class="inp"{% if not editable %} disabled{% endif %}>
+{%- set cur = row.value or f.default -%}
+{%- if not f.default %}<option value=""{% if not cur %} selected{% endif %}>Not set</option>{% endif %}
+{%- for val, lab in f.options %}<option value="{{ val }}"{% if val == cur %} selected{% endif %}>{{ lab }}</option>{% endfor %}
+{%- if cur and cur not in f.options|map('first')|list %}<option value="{{ cur }}" selected>{{ cur }}</option>{% endif %}
+</select>
+{%- elif f.type == 'secret' -%}
+<input id="{{ id }}" name="{{ f.key }}" class="inp mono" type="password" autocomplete="new-password" placeholder="{{ 'Stored · leave blank to keep' if row.stored else 'Not set' }}"{% if not editable %} disabled{% endif %}>
+{%- else -%}
+<input id="{{ id }}" name="{{ f.key }}" class="inp{{ ' mono' if f.type in ('json', 'parser') or f.wide }}" value="{{ row.value }}" placeholder="{{ ph }}"{% if f.type in ('number', 'float') %} inputmode="{{ 'numeric' if f.type == 'number' else 'decimal' }}"{% endif %} autocomplete="off" spellcheck="false"{% if not editable %} disabled{% endif %}>
+{%- endif -%}
+{%- if f.help %}<span class="hint">{{ f.help }}</span>{% endif -%}
+{%- if f.warn %}<span class="warnh">{{ f.warn }}</span>{% endif -%}
+</div>
+{%- endif -%}
+{%- endmacro -%}
+{% block main %}
+<main style="max-width:1280px;margin:0 auto;padding:32px 24px;box-sizing:border-box;display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start">
+<aside style="flex:1 1 200px;max-width:256px;min-width:0;padding-left:8px;position:sticky;top:16px" aria-label="LightRAG settings sections">
+<nav class="nav" id="setnav">
+<a class="on" href="#status">{{ icon('play') }}Status</a>
+{% for g in groups %}<a href="#{{ g.id }}">{{ icon('sliders') }}{{ g.title }}</a>{% endfor %}
+<a href="#other">{{ icon('code') }}Other variables</a>
+<a href="#deploy">{{ icon('db') }}Deployment</a>
+</nav>
+<div class="hint" style="margin-top:16px;padding:0 8px"><a href="{{ base }}/settings">{{ icon('arrow', '', 'transform:rotate(180deg)') }} Project settings</a></div>
+</aside>
+
+<div style="flex:999 1 560px;min-width:0;max-width:880px;display:flex;flex-direction:column;gap:32px">
+{% include "_flash.html" %}
+{% if error %}
+<div class="flash bad" role="alert">{{ icon('bad', 'bad', 'margin-top:2px') }}<div style="flex:1;display:flex;flex-direction:column;gap:2px"><strong>Not saved</strong><span>{{ error }}</span></div></div>
+{% endif %}
+
+<section id="status" style="display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;flex-direction:column;gap:4px">
+<h1 style="margin:0;font-size:24px;font-weight:600">LightRAG settings</h1>
+<span class="mut">Settings of this project's LightRAG server, saved to <span class="mono">{{ env_path }}</span> on the server. They take effect when LightRAG restarts.</span>
+</div>
+{% include "_lr_status.html" %}
+</section>
+
+{% if not editable %}
+<div class="flash warn" role="status">{{ icon('warn', 'warn', 'margin-top:2px') }}<div style="flex:1;display:flex;flex-direction:column;gap:2px"><strong>Read-only</strong><span class="mut">The portal can't see this project's .env. On the server run <span class="mono">./setup.sh deploy {{ project }}</span> once to enable editing here, or edit <span class="mono">{{ env_path }}</span> by hand.</span></div></div>
+{% endif %}
+
+<form id="lrform" method="post" action="{{ base }}/lightrag" style="display:flex;flex-direction:column;gap:32px">
+{% for g in groups %}
+<section id="{{ g.id }}" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">{{ g.title }}</h2>
+{% if g.desc %}<span class="hint" style="font-size:14px;margin-top:-8px">{{ g.desc }}</span>{% endif %}
+{% if g.id == 'graph' %}
+{%- set kg = g.rows[0] -%}
+<div class="kg{{ ' off' if (kg.value|lower) == 'true' }}">{{ field(kg) }}</div>
+<div class="lrg">{% for row in g.rows[1:] %}{{ field(row) }}{% endfor %}</div>
+{% else %}
+<div class="lrg">{% for row in g.rows %}{{ field(row) }}{% endfor %}</div>
+{% endif %}
+</section>
+{% endfor %}
+
+<section id="other" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">Other variables</h2>
+<span class="hint" style="font-size:14px;margin-top:-8px">Any other LightRAG environment variable, one <span class="mono">KEY=value</span> per line (see LightRAG's env.example). Delete a line to unset it. Secrets show as {{ '••••••••' }}; leave them as they are to keep them.</span>
+<div class="fld"><label for="f_other" class="visually-hidden">Other variables</label>
+<textarea id="f_other" name="__other" class="inp" rows="{{ [other.splitlines()|length + 2, 6]|max }}" spellcheck="false"{% if not editable %} disabled{% endif %}>{{ other }}</textarea></div>
+</section>
+
+<div class="savebar">
+<button class="btn pri" name="action" value="restart"{% if not editable or not live.can_restart %} disabled{% endif %} data-confirm="{{ 'LightRAG is processing documents. Restarting interrupts the batch. Save and restart now?' if stats.ok and stats.busy else 'Save and restart LightRAG? Queries and ingestion pause for up to a minute.' }}">{{ icon('retry') }}Save and restart</button>
+<button class="btn" name="action" value="save"{% if not editable %} disabled{% endif %}>Save</button>
+<a class="btn" href="{{ base }}/lightrag">Discard changes</a>
+<span class="hint" style="flex:1 1 200px">Saving writes the .env only; LightRAG keeps its current settings until it restarts.</span>
+</div>
+</form>
+
+<section id="deploy" style="display:flex;flex-direction:column;gap:16px">
+<h2 class="st">Deployment</h2>
+<span class="hint" style="font-size:14px;margin-top:-8px">Managed by <span class="mono">setup.sh</span> (URLs, ports, storage, database credentials, access key). Change them on the server.</span>
+<div class="box"><div class="br first"><div class="kv mono">
+{% for k, val in deploy %}<span class="mut">{{ k }}</span><span>{{ val }}</span>{% endfor %}
+</div></div></div>
+</section>
+</div>
+</main>
+<script>
+(function(){var links=document.querySelectorAll('#setnav a');function upd(){var y=window.scrollY+120,cur=links[0];links.forEach(function(a){var t=document.querySelector(a.getAttribute('href'));if(t&&t.offsetTop<=y)cur=a;});links.forEach(function(a){a.classList.toggle('on',a===cur)});}
+var lock=0;links.forEach(function(a){a.addEventListener('click',function(){links.forEach(function(x){x.classList.toggle('on',x===a)});lock=Date.now();});});
+window.addEventListener('scroll',function(){if(Date.now()-lock>800)upd();},{passive:true});upd();
+var kg=document.getElementById('f_MMRAG_SKIP_KG');if(kg)kg.addEventListener('change',function(){kg.closest('.kg').classList.toggle('off',kg.value==='true')});
+var f=document.getElementById('lrform'),dirty=false;if(f){f.addEventListener('input',function(){dirty=true});f.addEventListener('submit',function(){dirty=false});
+window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue='';}});}})();
+</script>
+{% endblock %}

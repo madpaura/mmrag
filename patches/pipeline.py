@@ -24,7 +24,7 @@ import re
 import shutil
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -2049,6 +2049,14 @@ class _PipelineMixin:
                 doc_process_opts = parse_process_options(
                     (content_data or {}).get("process_options", "")
                 )
+                # mmrag: MMRAG_SKIP_KG=true skips entity/relation extraction for
+                # every document. Upstream only honours '!' from LIGHTRAG_PARSER
+                # rules / filename hints, i.e. file uploads; text inserts
+                # (/documents/text) could never opt out.
+                if not doc_process_opts.skip_kg and get_env_value(
+                    "MMRAG_SKIP_KG", False, bool
+                ):
+                    doc_process_opts = replace(doc_process_opts, skip_kg=True)
 
                 # Resume guard: if content was already extracted under
                 # earlier process_options, purge stale chunks + KG before
@@ -2434,7 +2442,7 @@ class _PipelineMixin:
                 # store so naive / mix retrieval still works.
                 if doc_process_opts.skip_kg:
                     logger.info(
-                        f"[skip_kg] process_options '!' set for d-id: {doc_id}; "
+                        f"[skip_kg] process_options '!' or MMRAG_SKIP_KG set for d-id: {doc_id}; "
                         f"skipping entity/relation extraction"
                     )
                     chunk_results = []

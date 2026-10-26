@@ -35,7 +35,7 @@ a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
 {{ icon('db', 'mut') }}
 <div style="font-size:20px;display:flex;align-items:center;gap:6px"><a href="{{ base }}/">mmrag</a><span class="mut">/</span>
 <details class="menu"><summary class="btn sm" style="font-size:20px;font-weight:600;height:32px;background:transparent;border-color:transparent;padding:0 4px">{{ project }}{{ icon('caret') }}</summary>
-<div class="menu-pop"><a href="{{ base }}/settings">Project settings</a><a href="{{ api_url }}/docs" target="_blank" rel="noopener">LightRAG API docs</a><a href="{{ api_url }}/webui/" target="_blank" rel="noopener">LightRAG web UI</a></div></details></div>
+<div class="menu-pop"><a href="{{ base }}/settings">Project settings</a><a href="{{ base }}/lightrag">LightRAG settings</a><a href="{{ api_url }}/docs" target="_blank" rel="noopener">LightRAG API docs</a><a href="{{ api_url }}/webui/" target="_blank" rel="noopener">LightRAG web UI</a></div></details></div>
 <span class="lbl">LightRAG project</span>
 {% if tab in ('overview', 'sources', 'runs', 'documents') and not hide_actions %}
 <div style="flex:1"></div>
@@ -54,6 +54,7 @@ a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
 {{ tablink('runs', '/runs', 'play', 'Runs', nav.runs) }}
 {{ tablink('documents', '/documents', 'file', 'Documents', nav.docs) }}
 {{ tablink('ask', '/ask', 'chat', 'Ask') }}
+{{ tablink('lightrag', '/lightrag', 'plug', 'LightRAG') }}
 {{ tablink('guides', '/guides', 'book', 'Guides') }}
 {{ tablink('settings', '/settings', 'sliders', 'Settings') }}
 </nav>

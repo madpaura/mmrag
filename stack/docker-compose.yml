@@ -37,9 +37,11 @@ services:
     restart: unless-stopped
 
   # LightRAG + local patch (patches/pipeline.py is written against v1.5.2 — :latest does NOT start with it).
+  # No env_file: stack/lightrag_run.py loads .env itself on every start, so the portal's "Save and restart"
+  # applies new settings without recreating the container (setup.sh restarts it when .env changed).
   rag-app:
     image: ${LIGHTRAG_IMAGE:-ghcr.io/hkuds/lightrag:v1.5.2}
-    env_file: .env
+    entrypoint: ["python", "/mmrag/lightrag_run.py"]
     environment:
       HOST: "0.0.0.0"
       PORT: "9621"
@@ -48,11 +50,15 @@ services:
       PROMPT_DIR: "/app/data/prompts"
       # served behind nginx at ${BASE_URL}${API_PREFIX}/ (nginx strips the prefix)
       LIGHTRAG_API_PREFIX: "${API_PREFIX}"
+      MMRAG_PINNED_ENV: HOST,PORT,WORKING_DIR,INPUT_DIR,PROMPT_DIR,LIGHTRAG_API_PREFIX   # the keys above beat .env
     volumes:
       - rag_inputs:/app/data/inputs
       - rag_storage:/app/data/rag_storage
       - ./prompts:/app/data/prompts
       - ../../patches/pipeline.py:/app/lightrag/pipeline.py:ro
+      - ../../stack/lightrag_run.py:/mmrag/lightrag_run.py:ro
+      - ./:/mmrag/project:ro               # the directory, not .env: setup.sh rewrites the file (new inode)
+      - lr_control:/mmrag/control          # restart requests from the portal, status back to it
     ports:
       - "127.0.0.1:${LIGHTRAG_PORT}:9621"
     depends_on:
@@ -84,9 +90,13 @@ services:
       LIGHT_RAG_URL: ${LIGHT_RAG_URL}
       PORTAL_BASE_PATH: ${MGMT_PREFIX}
       MMRAG_CA_DIR: /certs              # company CAs from ./setup.sh trust-ca
+      PORTAL_PROJECT_ENV: /mmrag/project/.env   # LightRAG page edits it ...
+      PORTAL_CONTROL_DIR: /mmrag/control        # ... and asks rag-app to restart here
     volumes:
       - portal_data:/data
       - ../../config/ca:/certs:ro
+      - ./:/mmrag/project
+      - lr_control:/mmrag/control
     ports:
       - "127.0.0.1:${PORTAL_PORT}:8080"
     depends_on:
@@ -106,3 +116,4 @@ volumes:
   rag_inputs:
   rag_storage:
   portal_data:
+  lr_control:
