@@ -60,7 +60,7 @@ Project-specific LightRAG settings: the portal's **LightRAG** page (*Save and re
 A backup contains every volume (postgres, neo4j, rag_storage, inputs, portal DB with sources/credentials), plus `.env`, compose, nginx snippet, prompts and the patch. **Treat backups as secrets.**
 
 ## Management portal (`/mmrag/<proj>/mgmt/`)
-* **Sources**: Confluence (root pages + depth, or a whole space, optionally the Jira tickets linked from pages) and Jira (project / JQL / keys, comments, linked-issue depth). Each has *Test connection*, *Run now*, and daily/weekly schedules.
+* **Sources**: Confluence (root pages or a space, down to a depth, optionally the Jira tickets linked from pages) and Jira (project / JQL / keys, comments, linked-issue depth). Each has *Test connection*, *Run now*, and daily/weekly schedules.
 * **Pipeline**: fetch → skip unchanged (content hash) → send new docs → monitor LightRAG → replace changed docs (old version deleted once LightRAG is idle, then re-inserted). Scheduled runs are incremental.
 * **Runs**: live progress (found / unchanged / sent / processed / failed), log, per-document errors, cancel.
 * **Upload documents**: PDF/DOCX/MD/TXT…, parsed by LightRAG's parser. Re-uploading the same name replaces the old version.

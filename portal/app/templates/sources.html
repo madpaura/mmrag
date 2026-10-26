@@ -54,7 +54,7 @@
 <section style="display:flex;flex-direction:column;gap:12px" aria-labelledby="conn-h">
 <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h2 id="conn-h" style="margin:0;font-size:16px;font-weight:600">Add a connector</h2><span class="mut" style="font-size:12px">Each source fetches content, skips anything unchanged since the last run and sends the rest to LightRAG.</span></div>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:16px">
-{% set blurbs = {'confluence': 'Root pages and their children, or a whole space. Optionally follows linked Jira tickets.',
+{% set blurbs = {'confluence': 'Root pages or a space, down to a chosen depth. Optionally follows linked Jira tickets.',
                  'jira': 'By project, JQL or explicit issue keys, with comments and linked-issue depth.'} %}
 {% for t, c in types.items() %}
 <div class="card">

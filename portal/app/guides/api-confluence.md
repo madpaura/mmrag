@@ -17,10 +17,13 @@ export CONFLUENCE_TOKEN=<personal access token>   # Confluence → profile → S
 # a page and two levels of children
 python confluence_ingest.py --base-url https://confluence.example.com --root 123456 --depth 3
 
-# several roots (ids or page URLs), or a whole space
+# several roots (ids or page URLs)
 python confluence_ingest.py --base-url https://confluence.example.com \
     --root https://confluence.example.com/spaces/ENG/pages/123456/Home --root 654321
-python confluence_ingest.py --base-url https://confluence.example.com --space ENG
+
+# a space: its top-level pages and one level below them, or the whole space (--depth 0)
+python confluence_ingest.py --base-url https://confluence.example.com --space ENG --depth 2
+python confluence_ingest.py --base-url https://confluence.example.com --space ENG --depth 0
 
 # preview without ingesting
 python confluence_ingest.py --base-url https://confluence.example.com --root 123456 --dry-run
@@ -42,8 +45,9 @@ done
 | Option | Meaning |
 | --- | --- |
 | `--root` | Page id or URL; repeatable. Each root and its children are ingested |
-| `--space` | Space key: every page of the space |
-| `--depth` | Levels below each root (`1` = root only) |
+| `--space` | Space key: the space, from its top-level pages (usually just the home page) down to `--depth` |
+| `--depth` | Levels to ingest: `1` = the roots (or the space's top-level pages) only, `0` = all levels |
+| `--timeout` | Seconds to wait for one Confluence answer (default 120); slow answers are retried in smaller batches |
 | `--state` | File that remembers content hashes, so re-runs only send changed pages |
 | `--lightrag-url` | Defaults to this project: `{{API}}` |
 | `--insecure` | Skip TLS verification (self-signed internal servers) |

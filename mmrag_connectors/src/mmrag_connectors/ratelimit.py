@@ -35,7 +35,9 @@ def _retry_after(r: httpx.Response) -> float | None:
 class RateLimitedClient:
     def __init__(self, *, headers: dict, verify, max_rps: float = 2.0, max_retries: int = 8,
                  max_wait: float = 300.0, log: Callable[[str], None] | None = None, timeout: float = 60):
-        self.http = httpx.Client(headers=headers, timeout=timeout, verify=verify, follow_redirects=True)
+        self.timeout = timeout
+        self.http = httpx.Client(headers=headers, timeout=httpx.Timeout(timeout, connect=min(timeout, 15)),
+                                 verify=verify, follow_redirects=True)
         self.min_interval = 1.0 / max_rps if max_rps and max_rps > 0 else 0.0
         self.max_retries, self.max_wait = max_retries, max_wait
         self.log = log or (lambda m: None)

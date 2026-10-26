@@ -5,11 +5,14 @@ Run:  python mock_atlassian.py [--port 8090]
   Token (both): sim-token
   Root page id: 1000, space key: SIM, Jira project: SIM
 Mutate to test incremental sync:  POST /sim/touch/page/1001   POST /sim/touch/issue/SIM-3
+Slow Confluence (seconds per rendered page body):  POST /sim/slow?body=0.5  (one heavy page: ?page=1005&seconds=5)
+Back to the initial data:  POST /sim/reset
 """
 from __future__ import annotations
 
 import argparse
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import uvicorn
@@ -131,6 +134,8 @@ def page_json(p, expand="", base=None):
            "version": {"number": p["rev"], "when": iso(p["when"])},
            "_links": {"webui": f"/spaces/SIM/pages/{p['id']}/{p['title'].replace(' ', '+')}"}}
     if "body.view" in expand:
+        # rendering bodies is what makes a real Confluence slow
+        time.sleep(SIM.get("body_delay", 0) + (SIM.get("page_delay", 0) if p["id"] == SIM.get("slow_page") else 0))
         out["body"] = {"view": {"value": page_html(p, base)}}
     return out
 
@@ -142,7 +147,7 @@ def spaces(limit: int = 25):
 
 @app.get("/confluence/rest/api/content/search", dependencies=[Depends(auth)])
 def cql_search(cql: str, request: Request, limit: int = 25, start: int = 0, expand: str = ""):
-    """Subset of CQL: ancestor = N, space = "KEY", id = N, type = page, lastmodified >= "yyyy-MM-dd HH:mm"."""
+    """Subset of CQL: ancestor = N, space = "KEY", id in (N, ...), type = page, lastmodified >= "yyyy-MM-dd HH:mm"."""
     if SIM.get("no_cql"):
         raise HTTPException(400, "CQL disabled in simulator")
     base = f"{request.url.scheme}://{request.headers.get('host', 'localhost:8090')}"
@@ -150,13 +155,16 @@ def cql_search(cql: str, request: Request, limit: int = 25, start: int = 0, expa
     if m := re.search(r"ancestor\s*=\s*(\d+)", cql):
         anc = m.group(1)
         res = [p for p in res if any(a["id"] == anc for a in ancestors(p))]
+    if m := re.search(r"\bid\s+in\s*\(([^)]*)\)", cql):
+        ids = set(re.findall(r"\d+", m.group(1)))
+        res = [p for p in res if p["id"] in ids]
     if m := re.search(r'space\s*=\s*"?(\w+)"?', cql):
         res = res if m.group(1) == "SIM" else []
     if m := re.search(r'lastmodified\s*>=\s*"([\d\- :]+)"', cql):
         t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
         res = [p for p in res if p["when"] >= t]
-    out = [page_json(p, expand, base) for p in res]
-    return {"results": out[start:start + limit], "size": len(out[start:start + limit]), "totalSize": len(out)}
+    out = [page_json(p, expand, base) for p in res[start:start + limit]]
+    return {"results": out, "size": len(out), "totalSize": len(res)}
 
 
 @app.get("/confluence/rest/api/content/{pid}", dependencies=[Depends(auth)])
@@ -169,8 +177,8 @@ def get_page(pid: int, request: Request, expand: str = ""):
 @app.get("/confluence/rest/api/content/{pid}/child/page", dependencies=[Depends(auth)])
 def children(pid: int, request: Request, limit: int = 25, start: int = 0, expand: str = ""):
     base = f"{request.url.scheme}://{request.headers.get('host', 'localhost:8090')}"
-    res = [page_json(p, expand, base) for p in PAGES.values() if p["parent"] == pid]
-    return {"results": res[start:start + limit], "size": len(res)}
+    res = [p for p in PAGES.values() if p["parent"] == pid]
+    return {"results": [page_json(p, expand, base) for p in res[start:start + limit]], "size": len(res)}
 
 
 SIM: dict = {}
@@ -180,6 +188,30 @@ SIM: dict = {}
 def no_cql(on: bool = True):
     SIM["no_cql"] = on
     return SIM
+
+
+@app.post("/sim/slow")
+def slow(body: float = 0.0, page: str = "", seconds: float = 0.0):
+    """body: seconds per rendered page body; page + seconds: one extra-heavy page."""
+    SIM.update(body_delay=body, slow_page=page, page_delay=seconds)
+    return SIM
+
+
+@app.post("/sim/reset")
+def reset():
+    """Initial pages and issues (undoes /sim/touch), no slowness, CQL on."""
+    p, i = build()
+    PAGES.clear(), PAGES.update(p), ISSUES.clear(), ISSUES.update(i), SIM.clear()
+    return {"ok": True}
+
+
+@app.get("/confluence/rest/api/space/{key}/content/page", dependencies=[Depends(auth)])
+def space_top_pages(key: str, request: Request, depth: str = "all", limit: int = 25, start: int = 0, expand: str = ""):
+    base = f"{request.url.scheme}://{request.headers.get('host', 'localhost:8090')}"
+    if key != "SIM":
+        raise HTTPException(404, "No space with key")
+    res = [p for p in PAGES.values() if depth != "root" or p["parent"] is None]
+    return {"results": [page_json(p, expand, base) for p in res[start:start + limit]], "size": len(res)}
 
 
 @app.get("/confluence/rest/api/content", dependencies=[Depends(auth)])

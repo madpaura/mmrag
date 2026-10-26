@@ -6,7 +6,8 @@
     export CONFLUENCE_TOKEN=...          # personal access token (Confluence > Settings > Personal Access Tokens)
     python confluence_ingest.py --base-url https://confluence.example.com --root 123456 --depth 2
 
-Options: --root (repeatable, page id or URL), --space KEY (whole space), --depth N (levels below each root),
+Options: --root (repeatable, page id or URL), --space KEY (the space, from its top-level pages), --depth N
+(levels to ingest: 1 = the roots only, 0 = all), --timeout S (seconds to wait for one Confluence answer),
 --dry-run (only list what would be ingested), --no-wait (don't wait for LightRAG to finish processing).
 Re-running is safe: documents whose content is unchanged are skipped; changed ones replace the old version.
 """
@@ -27,8 +28,8 @@ def main() -> int:
     ap.add_argument("--base-url", required=True, help="Confluence base URL, incl. context path")
     ap.add_argument("--token", default=os.getenv("CONFLUENCE_TOKEN"), help="PAT (default: $CONFLUENCE_TOKEN)")
     ap.add_argument("--root", action="append", default=[], help="root page id or URL (repeatable)")
-    ap.add_argument("--space", help="space key: ingest every page of the space (ignored with --root)")
-    ap.add_argument("--depth", type=int, default=2, help="levels below each root (1 = root only)")
+    ap.add_argument("--space", help="space key: ingest the space from its top-level pages down to --depth (ignored with --root)")
+    ap.add_argument("--depth", type=int, default=2, help="levels to ingest (1 = the roots / top-level pages only, 0 = all)")
     ap.add_argument("--lightrag-url", default=os.getenv("LIGHTRAG_URL", LIGHTRAG_URL))
     ap.add_argument("--api-key", default=os.getenv("LIGHTRAG_API_KEY"), help="project access key (default: $LIGHTRAG_API_KEY)")
     ap.add_argument("--state", default=".confluence_ingest_state.json", help="remembers content hashes between runs")
@@ -36,13 +37,15 @@ def main() -> int:
     ap.add_argument("--no-wait", action="store_true")
     ap.add_argument("--insecure", action="store_true", help="don't verify TLS certificates")
     ap.add_argument("--max-rps", type=float, default=2, help="max requests/second to the server (rate limits)")
+    ap.add_argument("--timeout", type=int, default=120, help="seconds to wait for one Confluence answer")
     a = ap.parse_args()
     if not a.token:
         ap.error("set --token or $CONFLUENCE_TOKEN")
 
     # 1. connect to Confluence
     wiki = get("confluence")({"base_url": a.base_url, "token": a.token, "roots": "\n".join(a.root),
-                              "space": a.space or "", "depth": a.depth, "verify_ssl": not a.insecure, "max_rps": a.max_rps},
+                              "space": a.space or "", "depth": a.depth, "verify_ssl": not a.insecure, "max_rps": a.max_rps,
+                              "timeout": a.timeout},
                              log=lambda m: print("  ·", m))
     try:
         print("Confluence:", wiki.test())
